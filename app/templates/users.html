@@ -1,0 +1,198 @@
+{% extends "base.html" %}
+{% block title %}Quản lý User{% endblock %}
+{% block content %}
+<div class="card">
+  <h3>Quản lý role &amp; mật khẩu user</h3>
+  <table class="responsive-table">
+    <thead><tr><th>Email</th><th>Đổi role</th><th>Mật khẩu đăng nhập</th><th>Staging Replicas</th><th>Staging Restart</th><th>Staging Read</th><th>Production Replicas</th><th>Production Restart</th><th>Production Read</th></tr></thead>
+    <tbody>
+      {% for u in users %}
+      <tr>
+        <td data-label="Email">{{ u.email }}</td>
+        <td data-label="Đổi role">
+          <form class="inline role-form" method="post" action="/users/{{ u.id }}/role" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+            <select name="role">
+              {% for r in roles %}
+              <option value="{{ r }}" {% if r == u.role.value %}selected{% endif %}>{{ r }}</option>
+              {% endfor %}
+            </select>
+            <button type="submit">Lưu</button>
+            <span class="inline-flash" style="font-size:0.8rem;"></span>
+          </form>
+        </td>
+        <td data-label="Mật khẩu đăng nhập">
+          <form class="inline ajax-form" method="post" action="/users/{{ u.id }}/password" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+            <input type="password" name="password" placeholder="Mật khẩu mới" minlength="6" required style="width:140px;">
+            <button type="submit">Đặt mật khẩu</button>
+            <span style="font-size:0.8rem; color:#888;">{{ 'đã đặt' if u.password_hash else 'chưa đặt' }}</span>
+            <span class="inline-flash" style="font-size:0.8rem;"></span>
+          </form>
+        </td>
+        <td data-label="Staging Replicas" data-user-id="{{ u.id }}" data-perm-cell="staging-replicas">
+          {% if u.role.value == 'super_admin' %}
+          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
+          {% else %}
+          <form class="inline perm-toggle-form" data-flag="can_toggle_staging" method="post" action="/users/{{ u.id }}/staging-toggle" style="display:flex; align-items:center; gap:0.5rem;">
+            <button type="submit" class="switch {{ 'on' if u.can_toggle_staging }}" title="Bật/Tắt quyền sửa replicas (Bật/Tắt, đổi số pod, Sync, Tắt tất cả) Staging"></button>
+            <span class="inline-flash" style="font-size:0.8rem;"></span>
+          </form>
+          {% endif %}
+        </td>
+        <td data-label="Staging Restart" data-user-id="{{ u.id }}" data-perm-cell="staging-restart">
+          {% if u.role.value == 'super_admin' %}
+          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
+          {% else %}
+          <form class="inline perm-toggle-form" data-flag="can_toggle_restart_staging" method="post" action="/users/{{ u.id }}/staging-restart-toggle" style="display:flex; align-items:center; gap:0.5rem;">
+            <button type="submit" class="switch {{ 'on' if u.can_toggle_restart_staging }}" title="Bật/Tắt quyền Restart Staging"></button>
+            <span class="inline-flash" style="font-size:0.8rem;"></span>
+          </form>
+          {% endif %}
+        </td>
+        <td data-label="Staging Read" data-user-id="{{ u.id }}" data-perm-cell="staging-read">
+          {% if u.role.value == 'super_admin' %}
+          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
+          {% else %}
+          <form class="inline perm-toggle-form" data-flag="can_view_staging" method="post" action="/users/{{ u.id }}/staging-view-toggle" style="display:flex; align-items:center; gap:0.5rem;">
+            <button type="submit" class="switch {{ 'on' if u.can_view_staging }}" title="Bật/Tắt quyền chỉ xem (read-only) Staging"></button>
+            <span class="inline-flash" style="font-size:0.8rem;"></span>
+          </form>
+          {% endif %}
+        </td>
+        <td data-label="Production Replicas" data-user-id="{{ u.id }}" data-perm-cell="production-replicas">
+          {% if u.role.value == 'super_admin' %}
+          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
+          {% else %}
+          <form class="inline perm-toggle-form" data-flag="can_toggle_production" method="post" action="/users/{{ u.id }}/production-toggle" style="display:flex; align-items:center; gap:0.5rem;">
+            <button type="submit" class="switch {{ 'on' if u.can_toggle_production }}" title="Bật/Tắt quyền sửa replicas (Bật/Tắt, đổi số pod, Sync) Production"></button>
+            <span class="inline-flash" style="font-size:0.8rem;"></span>
+          </form>
+          {% endif %}
+        </td>
+        <td data-label="Production Restart" data-user-id="{{ u.id }}" data-perm-cell="production-restart">
+          {% if u.role.value == 'super_admin' %}
+          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
+          {% else %}
+          <form class="inline perm-toggle-form" data-flag="can_toggle_restart_production" method="post" action="/users/{{ u.id }}/production-restart-toggle" style="display:flex; align-items:center; gap:0.5rem;">
+            <button type="submit" class="switch {{ 'on' if u.can_toggle_restart_production }}" title="Bật/Tắt quyền Restart Production"></button>
+            <span class="inline-flash" style="font-size:0.8rem;"></span>
+          </form>
+          {% endif %}
+        </td>
+        <td data-label="Production Read" data-user-id="{{ u.id }}" data-perm-cell="production-read">
+          {% if u.role.value == 'super_admin' %}
+          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
+          {% else %}
+          <form class="inline perm-toggle-form" data-flag="can_view_production" method="post" action="/users/{{ u.id }}/production-view-toggle" style="display:flex; align-items:center; gap:0.5rem;">
+            <button type="submit" class="switch {{ 'on' if u.can_view_production }}" title="Bật/Tắt quyền chỉ xem (read-only) Production"></button>
+            <span class="inline-flash" style="font-size:0.8rem;"></span>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<script>
+  // .perm-toggle-form/.role-form KHONG dung class "ajax-form" - tu xu ly fetch rieng thay
+  // vi di qua doAjaxSubmit dung chung (base.html): doAjaxSubmit khi form co .inline-flash
+  // chi hien toast, KHONG reload trang, nen giao dien (nut switch, hay 6 cot Staging/
+  // Production Replicas/Restart/Read phu thuoc role) van giu nguyen trang thai CU cho toi
+  // khi nguoi dung tu F5. Dung event delegation (1 listener duy nhat tren document, khong
+  // phai forEach gan tung form luc trang vua load) vi doi role co the VE LAI HTML cua 6 o
+  // Staging/Production Replicas/Restart/Read trong CUNG hang (xem renderPermCell) - form
+  // .perm-toggle-form moi sinh ra sau do van phai hoat dong, khong the gan listener 1
+  // lan roi bo qua cac form them vao sau.
+
+  const PERM_LABELS = {
+    'staging-replicas': { flag: 'can_toggle_staging', action: 'staging-toggle', title: 'Bật/Tắt quyền sửa replicas (Bật/Tắt, đổi số pod, Sync, Tắt tất cả) Staging' },
+    'staging-restart': { flag: 'can_toggle_restart_staging', action: 'staging-restart-toggle', title: 'Bật/Tắt quyền Restart Staging' },
+    'staging-read': { flag: 'can_view_staging', action: 'staging-view-toggle', title: 'Bật/Tắt quyền chỉ xem (read-only) Staging' },
+    'production-replicas': { flag: 'can_toggle_production', action: 'production-toggle', title: 'Bật/Tắt quyền sửa replicas (Bật/Tắt, đổi số pod, Sync) Production' },
+    'production-restart': { flag: 'can_toggle_restart_production', action: 'production-restart-toggle', title: 'Bật/Tắt quyền Restart Production' },
+    'production-read': { flag: 'can_view_production', action: 'production-view-toggle', title: 'Bật/Tắt quyền chỉ xem (read-only) Production' },
+  };
+
+  function renderPermCellHtml(kind, userId, role, canToggle) {
+    if (role === 'super_admin') {
+      return '<button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>';
+    }
+    const meta = PERM_LABELS[kind];
+    const onClass = canToggle ? ' on' : '';
+    return (
+      '<form class="inline perm-toggle-form" data-flag="' + meta.flag + '" method="post" ' +
+      'action="/users/' + userId + '/' + meta.action + '" style="display:flex; align-items:center; gap:0.5rem;">' +
+      '<button type="submit" class="switch' + onClass + '" title="' + meta.title + '"></button>' +
+      '<span class="inline-flash" style="font-size:0.8rem;"></span>' +
+      '</form>'
+    );
+  }
+
+  document.addEventListener('submit', async (e) => {
+    const form = e.target;
+
+    if (form.classList.contains('perm-toggle-form')) {
+      e.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      const flag = form.dataset.flag;
+      button.disabled = true;
+      try {
+        const res = await fetch(form.action, {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+          body: new FormData(form),
+        });
+        const data = await res.json();
+        window.showToast(data.message, data.ok);
+        if (data.ok) {
+          button.classList.toggle('on', !!data[flag]);
+        }
+      } catch (err) {
+        form.submit();
+        return;
+      } finally {
+        button.disabled = false;
+      }
+      return;
+    }
+
+    if (form.classList.contains('role-form')) {
+      e.preventDefault();
+      const button = form.querySelector('button[type="submit"]');
+      const row = form.closest('tr');
+      button.disabled = true;
+      try {
+        const res = await fetch(form.action, {
+          method: 'POST',
+          headers: { Accept: 'application/json' },
+          body: new FormData(form),
+        });
+        const data = await res.json();
+        window.showToast(data.message, data.ok);
+        // Doi role anh huong TRUC TIEP giao dien 6 o Staging/Production Replicas/Restart/
+        // Read trong CUNG hang (Super Admin luon hien nut bat+khoa, khac han cac role con
+        // lai) - ve lai NGAY thay vi doi F5, dung dung role/co quyen vua tra ve tu server.
+        if (data.ok && row) {
+          const cells = {
+            'staging-replicas': [row.querySelector('[data-perm-cell="staging-replicas"]'), data.can_toggle_staging],
+            'staging-restart': [row.querySelector('[data-perm-cell="staging-restart"]'), data.can_toggle_restart_staging],
+            'staging-read': [row.querySelector('[data-perm-cell="staging-read"]'), data.can_view_staging],
+            'production-replicas': [row.querySelector('[data-perm-cell="production-replicas"]'), data.can_toggle_production],
+            'production-restart': [row.querySelector('[data-perm-cell="production-restart"]'), data.can_toggle_restart_production],
+            'production-read': [row.querySelector('[data-perm-cell="production-read"]'), data.can_view_production],
+          };
+          Object.entries(cells).forEach(([kind, [cell, canToggle]]) => {
+            if (cell) cell.innerHTML = renderPermCellHtml(kind, cell.dataset.userId, data.role, canToggle);
+          });
+        }
+      } catch (err) {
+        form.submit();
+        return;
+      } finally {
+        button.disabled = false;
+      }
+    }
+  });
+</script>
+{% endblock %}

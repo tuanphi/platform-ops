@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Tạo request deploy{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Tạo request deploy</h2>
+  <form method="post" action="/tasks/create" id="create-form">
+    <p>
+      <label>Group <span style="color:#F64E60">*</span></label><br>
+      <div class="autocomplete">
+        <input type="text" id="group_search" placeholder="Chọn group..." autocomplete="off" required style="width:100%">
+        <div id="group_dropdown" class="autocomplete-dropdown" hidden></div>
+      </div>
+      <input type="hidden" name="group_id" id="group_id" required>
+    </p>
+    <p>
+      <label>Application <span style="color:#F64E60">*</span></label><br>
+      <div class="autocomplete">
+        <input type="text" name="application" id="application" placeholder="-- chọn group trước --" autocomplete="off" required style="width:100%" disabled>
+        <div id="application_dropdown" class="autocomplete-dropdown" hidden></div>
+      </div>
+    </p>
+    <p>
+      <label>Commit ID <span style="color:#F64E60">*</span></label><br>
+      <input type="text" name="commitid" required minlength="7" style="width:100%">
+    </p>
+    <p>
+      <label>Config env / secret / SQL (Tùy chọn)</label><br>
+      <textarea name="config_env" style="width:100%" rows="3"></textarea>
+    </p>
+    <p>
+      <label>Mục đích <span style="color:#F64E60">*</span></label><br>
+      <textarea name="updatefor" required pattern=".*\S.*" title="Không được để trống" style="width:100%; resize:vertical;" rows="2"></textarea>
+    </p>
+    <p>
+      <label>Thời gian dự kiến deploy / nhắc nhở <span style="color:#F64E60">*</span></label><br>
+      <input type="text" id="confirmed_run_at" placeholder="dd/mm/yyyy hh:mm"
+        pattern="\d{2}/\d{2}/\d{4} \d{2}:\d{2}" autocomplete="off" style="max-width:280px"
+        title="Giờ VN (GMT+7) - chỉ để nhắc nhở, không tự động chạy - định dạng dd/mm/yyyy hh:mm" required>
+      <input type="hidden" name="confirmed_run_at" id="confirmed_run_at_iso">
+    </p>
+    <button type="submit">Submit</button>
+  </form>
+</div>
+
+<script>
+  const groups = {{ groups_data | tojson }};
+  const groupNameToId = Object.fromEntries(groups.map(g => [g.group_name, g.id]));
+
+  const groupSearch = document.getElementById('group_search');
+  const groupDropdown = document.getElementById('group_dropdown');
+  const groupIdInput = document.getElementById('group_id');
+  const appInput = document.getElementById('application');
+  const appDropdown = document.getElementById('application_dropdown');
+
+  let applicationNames = [];
+
+  // Dropdown tu dung (thay vi <datalist> - vi tri/style cua datalist do trinh
+  // duyet tu ve, khong kiem soat duoc, co the hien lech ra ngoai layout).
+  function setupAutocomplete(inputEl, dropdownEl, getItems, onSelect) {
+    function render(filterText) {
+      const items = getItems().filter(name => name.toLowerCase().includes(filterText.toLowerCase()));
+      if (!items.length) {
+        dropdownEl.hidden = true;
+        return;
+      }
+      // Dung textContent (khong phai innerHTML noi suy chuoi) de trinh duyet tu escape -
+      // name (ten Group/Application) den tu du lieu dong bo tu ten thu muc repo Helm
+      // charts, khong duoc coi la an toan de chen thang vao HTML.
+      dropdownEl.replaceChildren(
+        ...items.map((name) => {
+          const item = document.createElement('div');
+          item.className = 'autocomplete-item';
+          item.textContent = name;
+          return item;
+        })
+      );
+      dropdownEl.hidden = false;
+    }
+
+    inputEl.addEventListener('input', () => render(inputEl.value));
+    inputEl.addEventListener('focus', () => {
+      if (!inputEl.disabled) render(inputEl.value);
+    });
+    dropdownEl.addEventListener('mousedown', (e) => {
+      if (e.target.classList.contains('autocomplete-item')) {
+        e.preventDefault();
+        inputEl.value = e.target.textContent;
+        dropdownEl.hidden = true;
+        onSelect(e.target.textContent);
+      }
+    });
+    document.addEventListener('click', (e) => {
+      if (e.target !== inputEl) dropdownEl.hidden = true;
+    });
+  }
+
+  setupAutocomplete(groupSearch, groupDropdown, () => groups.map(g => g.group_name), async (name) => {
+    const gid = groupNameToId[name];
+    groupIdInput.value = gid || '';
+    appInput.value = '';
+    applicationNames = [];
+
+    if (!gid) {
+      appInput.disabled = true;
+      appInput.placeholder = '-- chọn group trước --';
+      return;
+    }
+
+    appInput.disabled = false;
+    appInput.placeholder = 'Đang tải...';
+
+    const res = await fetch(`/api/groups/${gid}/projects`);
+    const projects = await res.json();
+    applicationNames = projects.map(p => p.application_name);
+    appInput.placeholder = 'Chọn application...';
+  });
+
+  // Neu nguoi dung tu go/xoa lam sai lech voi group da chon hop le -> reset group_id,
+  // tranh submit nham group_id cu voi ten group da bi doi.
+  groupSearch.addEventListener('input', () => {
+    if (groupNameToId[groupSearch.value] === undefined) {
+      groupIdInput.value = '';
+      appInput.disabled = true;
+      appInput.value = '';
+      appInput.placeholder = '-- chọn group trước --';
+      applicationNames = [];
+    }
+  });
+
+  setupAutocomplete(appInput, appDropdown, () => applicationNames, () => {});
+
+  const confirmedRunAtInput = document.getElementById('confirmed_run_at');
+  const confirmedRunAtIsoInput = document.getElementById('confirmed_run_at_iso');
+  window.initDmyPicker(confirmedRunAtInput);
+
+  // "required" khong ap dung cho input type="hidden" theo chuan HTML, nen phai tu validate
+  // truoc khi submit de dam bao nguoi dung da chon dung 1 group co that trong danh sach.
+  // Ngoai ra, o gio nhap dang text dd/mm/yyyy hh:mm phai duoc doi sang ISO
+  // (yyyy-MM-ddThh:mm) truoc khi submit, dung ham parseDmyDatetime dung chung dinh nghia
+  // trong base.html, de backend (datetime.fromisoformat) khong can doi gi. Ghi gia tri ISO
+  // vao input hidden RIENG (confirmed_run_at_iso) - KHONG ghi de len chinh o hien thi
+  // (confirmed_run_at), tranh nguoi dung thay gio nhay tu dd/mm/yyyy hh:mm sang ISO ngay
+  // luc bam Submit (giong cach lam voi auto_run_at trong task_list.html).
+  document.getElementById('create-form').addEventListener('submit', (e) => {
+    if (!groupIdInput.value) {
+      e.preventDefault();
+      alert('Vui lòng chọn đúng 1 group trong danh sách gợi ý.');
+      groupSearch.focus();
+      return;
+    }
+    const isoValue = window.parseDmyDatetime(confirmedRunAtInput.value);
+    if (!isoValue) {
+      e.preventDefault();
+      alert('Giờ dự kiến chạy không hợp lệ. Vui lòng nhập đúng định dạng dd/mm/yyyy hh:mm (ví dụ 29/07/2026 14:30).');
+      confirmedRunAtInput.focus();
+      return;
+    }
+    confirmedRunAtIsoInput.value = isoValue;
+  });
+</script>
+{% endblock %}

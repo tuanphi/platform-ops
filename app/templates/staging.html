@@ -1,0 +1,406 @@
+{% extends "base.html" %}
+{% block title %}Thay đổi pod Staging{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:0.5rem; margin-bottom:1rem;">
+    <div style="display:flex; flex-direction:column; gap:0.5rem; min-width:0; flex:1 1 auto;">
+      <h2 style="margin:0;">Thay đổi pod Staging</h2>
+      <div style="font-size:0.8rem; color:#6b7280;">Tổng app: {{ total_apps }} · Đang chạy: {{ running_apps }} | Pod đang chạy: {{ running_pods }}</div>
+      {% if user.can_write_staging and user.can_turn_off_all_staging %}
+      <form id="turn-off-all-form" class="ajax-form" method="post" action="/staging/turn-off-all"
+        data-confirm="Bạn có chắc muốn TẮT TẤT CẢ ứng dụng staging (set replicas về 0 cho toàn bộ)? Hành động này áp dụng cho mọi ứng dụng đang có trong file values-staging." data-confirm-style="danger" style="flex-shrink:0;">
+        <button type="submit" class="btn-delete">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+            <path d="M18.36 6.64a9 9 0 11-12.73 0M12 2v10"/>
+          </svg>
+          Tắt tất cả
+        </button>
+      </form>
+      {% endif %}
+    </div>
+    {% if user.can_write_staging %}
+    <form id="sync-form" class="ajax-form" method="post" action="/staging/sync" style="flex-shrink:0;">
+      <button type="submit" class="icon-btn" title="Sync" aria-label="Sync">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
+    </form>
+    {% endif %}
+  </div>
+
+  <form id="bulk-on-form" class="ajax-form" method="post" action="/staging/bulk-toggle">
+    <input type="hidden" name="enabled" value="1">
+  </form>
+  <form id="bulk-off-form" class="ajax-form" method="post" action="/staging/bulk-toggle" data-confirm-style="danger">
+    <input type="hidden" name="enabled" value="0">
+  </form>
+
+  <div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; margin-bottom:1rem;">
+    <div style="position:relative; max-width:320px; flex:1 1 240px;">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+        style="position:absolute; left:0.6rem; top:50%; transform:translateY(-50%); width:15px; height:15px; stroke:#9ca3af; pointer-events:none;">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <input type="text" id="staging-filter" placeholder="Lọc theo Project hoặc Application..."
+        style="width:100%; box-sizing:border-box; padding:0.45rem 0.6rem 0.45rem 2.1rem;">
+    </div>
+  </div>
+
+  {% if user.can_write_staging or user.can_restart_staging %}
+  <!-- data-can-write/data-can-restart: JS (refresh()) doc 2 co nay de quyet dinh nut nao
+  duoc BAT khi co chon app - toolbar hien 1 khi co IT NHAT 1 trong 2 quyen, nhung tung nut
+  con lai (Bat/Tat can_write_staging, Restart can_restart_staging) PHAI kiem RIENG, tranh
+  vd user chi co quyen Restart lai bam duoc Bat/Tat. -->
+  <div id="staging-bulk-toolbar" data-can-write="{{ '1' if user.can_write_staging else '0' }}" data-can-restart="{{ '1' if user.can_restart_staging else '0' }}" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:1rem;">
+    {% if user.is_full_access_role %}
+    <input type="checkbox" id="staging-select-all" title="Chọn tất cả" aria-label="Chọn tất cả">
+    {% endif %}
+    <span id="staging-bulk-count" style="font-size:0.85rem; color:#555;">Đã chọn 0 ứng dụng</span>
+    <button type="submit" form="bulk-on-form" class="run" id="staging-bulk-on-btn" disabled>Bật</button>
+    <button type="submit" form="bulk-off-form" class="danger" id="staging-bulk-off-btn" disabled>Tắt</button>
+    <!-- Nut Restart PHAI nam TRONG form cua no (khac 2 nut tren dung attribute form=
+    tro toi <form> khai bao rieng o ngoai) - doAjaxSubmit (base.html) tim button qua
+    form.querySelector('button[type="submit"]'), CHI tim duoc DESCENDANT that su cua
+    form, khong theo duoc lien ket qua attribute form= - can button la con truc tiep de
+    doi nhan "Dang khoi dong lai.../Da khoi dong lai" (data-no-reload="1") hoat dong
+    dung nhu nut Restart don o cot Restart. display:contents tren <form> de KHONG pha
+    layout flex cua toolbar (nut Restart van xep ngang hang voi Bat/Tat).
+    csrf_token dat san TINH (khong doi moi lan submit, khac input "apps" duoc JS tu sinh
+    lai) - restart_service.bulk_restart_apps() lap goi ArgoCD rieng cho tung app (KHAC
+    bulk-on-form/off-form dung 1 GIT COMMIT duy nhat), nen can CSRF nhu nut Restart don. -->
+    <form id="bulk-restart-form" class="ajax-form" method="post" action="/staging/bulk-restart" data-no-reload="1" style="display:contents;">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+      <button type="submit" id="staging-bulk-restart-btn" disabled
+        data-processing-label="Đang khởi động lại..." data-success-label="Đã khởi động lại">Restart</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <table class="responsive-table">
+    <thead>
+      <tr>
+        <th></th>
+        <th>Project</th>
+        <th>Application</th>
+        <th>Trạng thái</th>
+        <th>Bật/Tắt</th>
+        <th>Restart</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in apps %}
+      <tr data-project="{{ row.project }}" data-app="{{ row.application }}">
+        <td>
+          {% if user.can_write_staging or user.can_restart_staging %}
+          <input type="checkbox" class="staging-select" value="{{ row.project }}|{{ row.application }}">
+          {% endif %}
+        </td>
+        <td data-label="Project">{{ row.project }}</td>
+        <td data-label="Application">{{ row.application }}</td>
+        <td data-label="Trạng thái">
+          {% if row.enabled %}
+          <span class="badge" style="background:#1BC5BD;">ON ({{ row.replicas }} pod)</span>
+          {% else %}
+          <span class="badge" style="background:#6B7280;">OFF</span>
+          {% endif %}
+        </td>
+        <td data-label="Bật/Tắt">
+          <!-- Luon render form (khong an sau "—") - thieu quyen can_write_staging thi LAM
+          MO ca 3 dieu khien qua thuoc tinh disabled native (button:disabled trong
+          base.html tu giam opacity), giong cach task_list.html lam mo Approve/Reject/Run
+          khi thieu quyen, thay vi an han di. -->
+          <form class="inline ajax-form staging-toggle-form" method="post" action="/staging/toggle" style="display:flex; align-items:center; gap:0.5rem;">
+            <input type="hidden" name="project" value="{{ row.project }}">
+            <input type="hidden" name="application" value="{{ row.application }}">
+            <input type="hidden" name="enabled" value="{{ '1' if row.enabled else '0' }}" class="staging-enabled-input">
+            <button type="button" class="switch staging-toggle-btn {{ 'on' if row.enabled }}" title="Bật/Tắt" {% if not user.can_write_staging %}disabled{% endif %}></button>
+            <input type="number" name="replicas" min="1" value="{{ row.replicas if (row.replicas and row.replicas != '0') else 1 }}"
+              class="staging-replicas-input" style="width:70px;" {% if not row.enabled or not user.can_write_staging %}disabled{% endif %}>
+            <button type="submit" {% if not user.can_write_staging %}disabled{% endif %}>Lưu</button>
+          </form>
+        </td>
+        <td data-label="Restart">
+          <!-- Restart CHI khoi dong lai pod (annotation restartedAt qua ArgoCD), KHONG doi
+          replicas/cot "Trang thai" o tren - data-no-reload="1" de nut tu doi nhan tam thoi
+          thay vi reload ca trang (xem doAjaxSubmit trong base.html). Quyen RIENG
+          can_restart_staging, TACH BIET voi can_write_staging (sua replicas) tu
+          2026-08-18. Luon render form, LAM MO nut qua disabled khi thieu quyen (giong cot
+          Bat/Tat o tren), khong an han bang "—" nua. -->
+          <form class="ajax-form restart-form" method="post" action="/staging/restart"
+            data-confirm="Xác nhận khởi động lại (restart) ứng dụng '{{ row.application }}'?" data-no-reload="1">
+            <input type="hidden" name="project" value="{{ row.project }}">
+            <input type="hidden" name="application" value="{{ row.application }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+            <button type="submit" {% if not user.can_restart_staging %}disabled{% endif %} data-processing-label="Đang khởi động lại..." data-success-label="Đã khởi động lại">Restart</button>
+          </form>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6">Chưa có dữ liệu - bấm "Làm mới" để đồng bộ danh sách từ git (hoặc chờ đồng bộ tự động)</td></tr>
+      {% endfor %}
+      <tr id="staging-filter-empty" style="display:none;"><td colspan="6">Không có ứng dụng nào khớp bộ lọc</td></tr>
+    </tbody>
+  </table>
+  <div id="staging-pagination" class="pagination" style="display:none;">
+    <button type="button" id="staging-page-prev" class="page-btn" aria-label="Trang trước">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <div id="staging-page-numbers" style="display:contents;"></div>
+    <button type="button" id="staging-page-next" class="page-btn" aria-label="Trang sau">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <div style="margin-left:auto; display:flex; align-items:center; gap:0.4rem; font-size:0.85rem; color:#4b5563;">
+      <label for="staging-page-size">Rows per page</label>
+      <select id="staging-page-size">
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+        <option value="300">300</option>
+        <option value="500">500</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<script>
+  (function () {
+    const selectAll = document.getElementById('staging-select-all');
+    const countLabel = document.getElementById('staging-bulk-count');
+    const toolbar = document.getElementById('staging-bulk-toolbar');
+    const canWriteBulk = toolbar ? toolbar.dataset.canWrite === '1' : false;
+    const canRestartBulk = toolbar ? toolbar.dataset.canRestart === '1' : false;
+    const onBtn = document.getElementById('staging-bulk-on-btn');
+    const offBtn = document.getElementById('staging-bulk-off-btn');
+    const restartBtn = document.getElementById('staging-bulk-restart-btn');
+    const onForm = document.getElementById('bulk-on-form');
+    const offForm = document.getElementById('bulk-off-form');
+    const restartForm = document.getElementById('bulk-restart-form');
+
+    function checkboxes() {
+      return Array.from(document.querySelectorAll('.staging-select'));
+    }
+    function selectableCheckboxes() {
+      // "Chon tat ca" chi chon cac dong DANG HIEN (khong bi o loc an di) - dong da chon
+      // truoc do ma bi loc an van giu nguyen trang thai chon, khong tu bo chon.
+      return checkboxes().filter((cb) => !cb.disabled && cb.closest('tr').style.display !== 'none');
+    }
+    function selectedValues() {
+      return checkboxes().filter((cb) => cb.checked).map((cb) => cb.value);
+    }
+
+    // Loc theo Project/Application (client-side, khong goi lai server - danh sach da co
+    // san tu cache). Khop ca 2 truong cung luc, khong phan biet hoa/thuong. Gia tri o loc
+    // luu vao sessionStorage MOI LAN go - trang nay hay bi reload toan bo (bam Sync, bam
+    // "Luu" 1 dong, hoac webhook tu dong trigger qua subscribeSyncEvents), khong luu lai
+    // thi noi dung dang go se mat trang sau moi lan reload do.
+    const FILTER_STORAGE_KEY = 'staging-filter-value';
+    const PAGE_SIZE_STORAGE_KEY = 'staging-page-size-value';
+    const PAGE_STORAGE_KEY = 'staging-page-value';
+    const filterInput = document.getElementById('staging-filter');
+    const filterEmptyRow = document.getElementById('staging-filter-empty');
+    const pageSizeSelect = document.getElementById('staging-page-size');
+    const paginationEl = document.getElementById('staging-pagination');
+    const pageNumbersEl = document.getElementById('staging-page-numbers');
+    const pagePrevBtn = document.getElementById('staging-page-prev');
+    const pageNextBtn = document.getElementById('staging-page-next');
+    // Khoi phuc trang dang xem tu sessionStorage - trang nay hay bi reload toan bo (bam
+    // Sync, bam "Luu" 1 dong, hoac webhook tu dong trigger qua subscribeSyncEvents), khong
+    // luu lai thi F5/reload luon nhay ve trang 1 du truoc do dang o trang giua/cuoi danh sach.
+    const savedPage = parseInt(sessionStorage.getItem(PAGE_STORAGE_KEY), 10);
+    let currentPage = savedPage >= 1 ? savedPage : 1;
+
+    function filterableRows() {
+      return Array.from(document.querySelectorAll('tbody tr[data-project]'));
+    }
+    function matchedRows() {
+      const q = filterInput.value.trim().toLowerCase();
+      return filterableRows().filter((row) => {
+        const hay = (row.dataset.project + ' ' + row.dataset.app).toLowerCase();
+        return !q || hay.includes(q);
+      });
+    }
+
+    // Port 1:1 tu _build_page_items() (app/routers/tasks_router.py) - tra ve mang so nguyen
+    // (1 trang) hoac null (dau "..."). Xem docstring ban Python cho giai thich thuat toan.
+    function buildPageItems(page, totalPages) {
+      if (totalPages <= 7) {
+        const items = [];
+        for (let i = 1; i <= totalPages; i += 1) items.push(i);
+        return items;
+      }
+      let windowStart = page - 1;
+      let windowEnd = page + 1;
+      if (windowStart < 2) {
+        const shift = 2 - windowStart;
+        windowStart += shift;
+        windowEnd += shift;
+      }
+      if (windowEnd > totalPages - 1) {
+        const shift = windowEnd - (totalPages - 1);
+        windowEnd -= shift;
+        windowStart -= shift;
+      }
+      windowStart = Math.max(windowStart, 2);
+      windowEnd = Math.min(windowEnd, totalPages - 1);
+
+      const items = [1];
+      if (windowStart - 1 > 1) items.push(null);
+      for (let i = windowStart; i <= windowEnd; i += 1) items.push(i);
+      if (totalPages - windowEnd > 1) items.push(null);
+      items.push(totalPages);
+      return items;
+    }
+
+    function renderPagination(totalPages) {
+      if (totalPages <= 1) {
+        paginationEl.style.display = 'none';
+        return;
+      }
+      paginationEl.style.display = 'flex';
+      pagePrevBtn.classList.toggle('disabled', currentPage <= 1);
+      pageNextBtn.classList.toggle('disabled', currentPage >= totalPages);
+      pageNumbersEl.innerHTML = buildPageItems(currentPage, totalPages).map((p) => {
+        if (p === null) return '<span class="page-ellipsis">…</span>';
+        const activeClass = p === currentPage ? ' active' : '';
+        return `<button type="button" class="page-btn${activeClass}" data-page="${p}">${p}</button>`;
+      }).join('');
+    }
+
+    // Loc chay tren TOAN BO danh sach (khong chi trang dang xem) roi moi phan trang ket
+    // qua - go filter luon tim thay dong khop du dong do dang nam o trang sau, khong bi
+    // "khuat" boi phan trang.
+    function render() {
+      const rows = filterableRows();
+      const matched = matchedRows();
+      const pageSize = parseInt(pageSizeSelect.value, 10) || 50;
+      const totalPages = Math.max(1, Math.ceil(matched.length / pageSize));
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+      sessionStorage.setItem(PAGE_STORAGE_KEY, String(currentPage));
+      const start = (currentPage - 1) * pageSize;
+      const pageSet = new Set(matched.slice(start, start + pageSize));
+      rows.forEach((row) => {
+        row.style.display = pageSet.has(row) ? '' : 'none';
+      });
+      filterEmptyRow.style.display = rows.length > 0 && matched.length === 0 ? '' : 'none';
+      renderPagination(totalPages);
+    }
+
+    if (pageSizeSelect) {
+      const savedPageSize = sessionStorage.getItem(PAGE_SIZE_STORAGE_KEY);
+      if (savedPageSize && ['50', '100', '200', '300', '500'].includes(savedPageSize)) {
+        pageSizeSelect.value = savedPageSize;
+      }
+      pageSizeSelect.addEventListener('change', () => {
+        sessionStorage.setItem(PAGE_SIZE_STORAGE_KEY, pageSizeSelect.value);
+        currentPage = 1;
+        render();
+      });
+    }
+    if (pagePrevBtn) {
+      pagePrevBtn.addEventListener('click', () => {
+        if (pagePrevBtn.classList.contains('disabled')) return;
+        currentPage -= 1;
+        render();
+      });
+    }
+    if (pageNextBtn) {
+      pageNextBtn.addEventListener('click', () => {
+        if (pageNextBtn.classList.contains('disabled')) return;
+        currentPage += 1;
+        render();
+      });
+    }
+    if (pageNumbersEl) {
+      pageNumbersEl.addEventListener('click', (e) => {
+        const btn = e.target.closest('.page-btn');
+        if (!btn || !btn.dataset.page) return;
+        currentPage = parseInt(btn.dataset.page, 10);
+        render();
+      });
+    }
+
+    if (filterInput) {
+      const savedFilter = sessionStorage.getItem(FILTER_STORAGE_KEY);
+      if (savedFilter) filterInput.value = savedFilter;
+      render();
+      filterInput.addEventListener('input', () => {
+        sessionStorage.setItem(FILTER_STORAGE_KEY, filterInput.value);
+        currentPage = 1;
+        render();
+      });
+    } else {
+      render();
+    }
+
+    function refresh() {
+      // countLabel/onBtn/offBtn/restartBtn co the khong ton tai (null) - toolbar bulk bi
+      // an hoan toan khoi DOM cho user KHONG co quyen sua nao (ca can_write_staging lan
+      // can_restart_staging deu False, xem Jinja o tren), phai guard tung o thay vi gia
+      // dinh luon co san. onBtn/offBtn CHI bat khi co can_write_staging (Bat/Tat la hanh
+      // dong sua replicas); restartBtn CHI bat khi co can_restart_staging - user co the
+      // chi co 1 trong 2 quyen (xem canWriteBulk/canRestartBulk o dau file).
+      const values = selectedValues();
+      if (countLabel) countLabel.textContent = `Đã chọn ${values.length} ứng dụng`;
+      if (onBtn) onBtn.disabled = values.length === 0 || !canWriteBulk;
+      if (offBtn) offBtn.disabled = values.length === 0 || !canWriteBulk;
+      if (restartBtn) restartBtn.disabled = values.length === 0 || !canRestartBulk;
+    }
+
+    // "Chon tat ca": CHI Admin tro len moi thay checkbox nay (xem user.is_full_access_role
+    // o <th> phia tren) - user thuong du duoc cap can_write_staging van chi tick tung
+    // dong rieng le (checkbox + toolbar bulk Bat/Tat van hien binh thuong), khong co nut
+    // "chon het 1 phat".
+    if (selectAll) {
+      selectAll.addEventListener('change', () => {
+        selectableCheckboxes().forEach((cb) => { cb.checked = selectAll.checked; });
+        refresh();
+      });
+    }
+
+    function setupBulkForm(form, verb) {
+      form.addEventListener('submit', () => {
+        if (form.dataset.confirmed === '1') return;
+        const values = selectedValues();
+        form.querySelectorAll('input[name="apps"]').forEach((el) => el.remove());
+        values.forEach((value) => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'apps';
+          input.value = value;
+          form.appendChild(input);
+        });
+        form.setAttribute('data-confirm', `Bạn có chắc muốn ${verb} ${values.length} ứng dụng đã chọn?`);
+      });
+    }
+    setupBulkForm(onForm, 'Bật');
+    setupBulkForm(offForm, 'Tắt');
+    if (restartForm) setupBulkForm(restartForm, 'khởi động lại');
+
+    checkboxes().forEach((cb) => cb.addEventListener('change', refresh));
+    refresh();
+
+    // Nut gat + o so pod trong tung dong: bam gat CHI doi giao dien tai cho (chua submit) -
+    // nguoi dung con co the sua so pod truoc khi bam "Luu" that su. Khac auto-deploy toggle
+    // (task_list.html) khong can modal rieng vi chi co 1 truong so (khong phai ngay+gio).
+    document.querySelectorAll('.staging-toggle-btn').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const form = btn.closest('form');
+        const enabledInput = form.querySelector('.staging-enabled-input');
+        const replicasInput = form.querySelector('.staging-replicas-input');
+        const nowOn = !btn.classList.contains('on');
+        btn.classList.toggle('on', nowOn);
+        enabledInput.value = nowOn ? '1' : '0';
+        replicasInput.disabled = !nowOn;
+        if (nowOn && (!replicasInput.value || replicasInput.value === '0')) {
+          replicasInput.value = '1';
+        }
+      });
+    });
+  })();
+
+  window.subscribeSyncEvents('staging', '#sync-form button');
+</script>
+{% endblock %}

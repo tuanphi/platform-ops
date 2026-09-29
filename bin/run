@@ -1,0 +1,26 @@
+#!/bin/sh
+# Link secret .env (mount qua k8s Secret tai /mnt/secrets/.env) vao thu muc chay code,
+# roi start app. Tach rieng khoi bin/cmd de co the goi thang bin/run khi debug trong container.
+set -eu
+
+SECRET_ENV_FILE="${SECRET_ENV_FILE:-/mnt/secrets/.env}"
+APP_ENV_FILE="${APP_ENV_FILE:-/app/.env}"
+# Cong tac thoat rieng cho dev local co chu dinh chay bin/run ma khong mount secret (vd
+# test container image) - PHAI duoc set tuong minh, mac dinh la fail-fast (fail-closed).
+ALLOW_MISSING_SECRET="${ALLOW_MISSING_SECRET:-false}"
+
+if [ -f "$SECRET_ENV_FILE" ]; then
+  ln -sf "$SECRET_ENV_FILE" "$APP_ENV_FILE"
+  echo "Linked $SECRET_ENV_FILE -> $APP_ENV_FILE"
+elif [ "$ALLOW_MISSING_SECRET" = "true" ]; then
+  echo "WARNING: $SECRET_ENV_FILE not found, ALLOW_MISSING_SECRET=true nen van chay voi config mac dinh (CHI DUNG CHO DEV LOCAL)" >&2
+else
+  # Fail-fast thay vi fail-open: truoc day thieu secret chi in WARNING roi van start voi
+  # SECRET_KEY/AUTH_DEV_MODE mac dinh khong an toan - production thieu secret la loi cau
+  # hinh nghiem trong (K8s Secret chua mount dung), phai dung lai ngay thay vi chay ngam.
+  echo "FATAL: $SECRET_ENV_FILE not found. Khong tim thay secret duoc mount qua K8s Secret." >&2
+  echo "Neu day la moi truong dev local co chu dinh chay thieu secret, set ALLOW_MISSING_SECRET=true." >&2
+  exit 1
+fi
+
+exec uvicorn app.main:app --host 0.0.0.0 --port 8000

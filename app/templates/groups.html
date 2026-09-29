@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}Quản lý Group/Project{% endblock %}
+{% block content %}
+<div class="card">
+  <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:0.75rem;">
+    <div style="min-width:0;">
+      <h2 style="margin:0 0 0.3rem;">Đồng bộ project/application</h2>
+      <div style="font-size:0.8rem; color:#666;">Quét từ thư mục <code>{{ catalog_charts_dir }}/</code></div>
+    </div>
+    <form id="sync-form" method="post" action="/catalog/sync" class="ajax-form" style="flex-shrink:0;">
+      <button type="submit" class="icon-btn" title="Sync từ thư mục {{ catalog_charts_dir }}/" aria-label="Sync từ thư mục {{ catalog_charts_dir }}/">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+          <polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/>
+          <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+        </svg>
+      </button>
+    </form>
+  </div>
+
+  <div style="display:flex; align-items:center; gap:0.6rem; margin-top:0.75rem;">
+    <form class="inline toggle-form" method="post" action="/catalog/auto-sync/toggle">
+      <button type="submit" class="switch {{ 'on' if auto_sync_enabled }}"
+        aria-label="{{ 'Tắt auto sync' if auto_sync_enabled else 'Bật auto sync' }}"></button>
+    </form>
+    <span style="font-size:0.85rem; color:#555;">Tự động sync mỗi {{ auto_sync_interval_minutes }} phút</span>
+  </div>
+</div>
+
+<div class="card">
+  <h3>Tạo group</h3>
+  <form method="post" action="/catalog/groups" class="ajax-form" style="display:flex; flex-wrap:wrap; gap:0.5rem;">
+    <input type="text" name="group_name" placeholder="Tên group" required>
+    <button type="submit">Create</button>
+  </form>
+</div>
+
+{% for g in groups %}
+<div class="card">
+  <div style="display:flex; align-items:center; gap:1rem; flex-wrap:wrap;">
+    <h3 style="margin:0;">{{ g.group_name }}</h3>
+    <form class="inline toggle-form" method="post" action="/catalog/groups/{{ g.id }}/toggle">
+      <button type="submit" class="switch {{ 'on' if g.is_active }}" aria-label="{{ 'Tắt group' if g.is_active else 'Bật group' }}"></button>
+    </form>
+
+    <span style="font-size:0.85rem; color:#555;">Admin project:</span>
+    {% for granted in g.granted_users %}
+    <div style="display:flex; flex-wrap:wrap; gap:0.3rem; align-items:center; font-size:0.85rem;">
+      <span>{{ granted.email }}</span>
+      <form class="inline ajax-form" method="post" action="/catalog/groups/{{ g.id }}/grants/{{ granted.id }}/revoke">
+        <button type="submit" class="danger" style="padding:0.1rem 0.4rem;">x</button>
+      </form>
+    </div>
+    {% endfor %}
+    <form method="post" action="/catalog/groups/{{ g.id }}/grants" class="ajax-form" style="display:flex; flex-wrap:wrap; gap:0.3rem;">
+      <input type="email" name="email" placeholder="Email user" required style="width:150px; font-size:0.85rem;">
+      <button type="submit" style="font-size:0.85rem; padding:0.3rem 0.5rem;">Lưu</button>
+    </form>
+  </div>
+
+  <table class="responsive-table" style="margin-top:0.75rem;">
+    <thead><tr><th>Application</th><th>Trạng thái</th><th>Admin application</th></tr></thead>
+    <tbody>
+      {% for p in g.projects %}
+      <tr>
+        <td data-label="Application">{{ p.application_name }}</td>
+        <td data-label="Trạng thái">
+          <form class="inline toggle-form" method="post" action="/catalog/projects/{{ p.id }}/toggle">
+            <button type="submit" class="switch {{ 'on' if p.is_active }}" aria-label="{{ 'Tắt application' if p.is_active else 'Bật application' }}"></button>
+          </form>
+        </td>
+        <td data-label="Admin application">
+          {% for granted in p.granted_users %}
+          <div style="display:flex; flex-wrap:wrap; gap:0.4rem; align-items:center; font-size:0.85rem;">
+            <span>{{ granted.email }}</span>
+            <form class="inline ajax-form" method="post" action="/catalog/projects/{{ p.id }}/grants/{{ granted.id }}/revoke">
+              <button type="submit" class="danger" style="padding:0.1rem 0.4rem;">x</button>
+            </form>
+          </div>
+          {% endfor %}
+          <form method="post" action="/catalog/projects/{{ p.id }}/grants" class="ajax-form" style="display:flex; flex-wrap:wrap; gap:0.3rem; margin-top:0.3rem;">
+            <input type="email" name="email" placeholder="Email user" required style="width:130px; font-size:0.85rem;">
+            <button type="submit" style="font-size:0.85rem; padding:0.3rem 0.5rem;">Lưu</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <form method="post" action="/catalog/groups/{{ g.id }}/projects" class="ajax-form" style="margin-top:0.5rem; display:flex; flex-wrap:wrap; gap:0.5rem;">
+    <input type="text" name="application_name" placeholder="Tên application mới" required>
+    <button type="submit">Thêm application</button>
+  </form>
+</div>
+{% endfor %}
+
+<script>
+  // Nut gat (switch) goi ngam bang fetch(), khong load lai trang. Neu loi (mat mang,
+  // het session...) thi fallback ve submit form binh thuong nhu cu (co load lai trang).
+  document.addEventListener('submit', async (e) => {
+    const form = e.target;
+    if (!form.classList.contains('toggle-form')) return;
+    e.preventDefault();
+
+    const button = form.querySelector('button.switch');
+    button.disabled = true;
+    try {
+      const res = await fetch(form.action, { method: 'POST', headers: { 'Accept': 'application/json' } });
+      const data = await res.json();
+      if (data.ok) {
+        button.classList.toggle('on', data.is_active);
+      } else {
+        alert(data.message || 'Có lỗi xảy ra, thử lại sau.');
+      }
+    } catch (err) {
+      form.submit();
+      return;
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+  window.subscribeSyncEvents('catalog', '#sync-form button');
+</script>
+{% endblock %}

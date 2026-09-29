@@ -1,0 +1,657 @@
+{% extends "base.html" %}
+{% block title %}Danh sách request{% endblock %}
+{% set next_url = request.url.path ~ ('?' ~ request.url.query if request.url.query else '') %}
+{% block content %}
+<div class="card">
+  <form method="get" action="/tasks" id="task-filter-form" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
+    <div id="task-filter-search-row" style="display:flex; flex-wrap:nowrap; gap:0.5rem; align-items:center; flex:1 1 260px; min-width:0;">
+      <input type="text" name="q" id="task-filter-q" value="{{ q }}" placeholder="Tìm theo ID, project, app, commit, email..." style="flex:1 1 auto; min-width:0;">
+      <button type="submit" id="task-filter-submit" aria-label="Tìm kiếm" title="Tìm kiếm" style="display:flex; align-items:center; justify-content:center; flex:0 0 auto; width:38px; height:38px; padding:0; background:#3699FF; border:1px solid #3699FF; border-radius:6px; color:#fff;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="16" height="16">
+          <circle cx="11" cy="11" r="7"/>
+          <path d="M21 21l-4.3-4.3"/>
+        </svg>
+      </button>
+    </div>
+    <div id="task-filter-actions-row" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; flex:1 1 auto;">
+      <div class="status-filter" id="status-filter-dropdown">
+        <button type="button" class="status-filter-toggle" id="status-filter-toggle" aria-expanded="false">
+          <span class="status-filter-dot" id="status-filter-dot" {% if status %}style="background: var(--status-{{ status }});"{% else %}style="display:none;"{% endif %}></span>
+          <span id="status-filter-label">{% if status %}{{ status }}{% else %}Tất cả trạng thái{% endif %}</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+            <path d="M6 9l6 6 6-6"/>
+          </svg>
+        </button>
+        <div class="status-filter-panel" id="status-filter-panel">
+          <a href="#" class="status-filter-option{% if not status %} active{% endif %}" data-status-value="">Tất cả trạng thái</a>
+          {% for s in statuses %}
+          <a href="#" class="status-filter-option{% if status == s %} active{% endif %}" data-status-value="{{ s }}" data-dot-color="var(--status-{{ s }})">
+            <span class="status-filter-dot" style="background: var(--status-{{ s }});"></span>{{ s }}
+          </a>
+          {% endfor %}
+        </div>
+      </div>
+      <input type="hidden" name="status" id="task-filter-status" value="{{ status }}">
+      <a href="/tasks/create" style="margin-left:auto;"><button type="button">+ Tạo request</button></a>
+    </div>
+  </form>
+</div>
+
+<script>
+  // Filter thanh loc /tasks bang AJAX - KHONG reload ca trang. Input "q" CHI duoc ap dung khi
+  // nguoi dung bam Enter (submit form) hoac bam nut "Tim kiem" (button type=submit) - khong
+  // con tu fetch theo tung phim go. Dropdown status "nav-dropdown"/"nav-dropdown-panel" co san
+  // (tai su dung pattern, xem base.html) van ap dung ngay khi chon. Ca hai deu goi applyFilters():
+  // fetch lai GET /tasks?q=...&status=... (khong kem page -> luon ve trang 1), roi thay <tbody> cua
+  // table.responsive-table VA khoi #pagination bang HTML moi tra ve, cuoi cung goi lai
+  // wireUpTaskRows() (dinh nghia global o khoi script ben duoi) de wire lai listener cho cac
+  // phan tu vua duoc thay the (checkbox chon dong, nut auto-toggle). IIFE rieng, doc lap voi
+  // cac khoi JS bulk/auto-deploy/polling khac trong file nay.
+  //
+  // Fallback khi JS bi tat: <form method="get" action="/tasks"> khong doi cau truc, nen se
+  // submit GET binh thuong (IIFE nay se khong chay toi buoc preventDefault vi khong co JS).
+  (function () {
+    const form = document.getElementById('task-filter-form');
+    if (!form) return;
+
+    const qInput = document.getElementById('task-filter-q');
+    const toggle = document.getElementById('status-filter-toggle');
+    const panel = document.getElementById('status-filter-panel');
+    const statusInput = document.getElementById('task-filter-status');
+    const statusLabel = document.getElementById('status-filter-label');
+    const statusDot = document.getElementById('status-filter-dot');
+
+    // requestSeq: token tang dan cho moi lan goi applyFilters(). Chi ap dung response cua
+    // request MOI NHAT (seq === requestSeq luc response ve) - tranh truong hop 2 request bay
+    // ra gan nhau nhung mang tra ve khong theo thu tu, khien ket qua cu ghi de ket qua moi.
+    let requestSeq = 0;
+
+    // #page-size-select nam BEN TRONG #pagination, o PHIA DUOI xa trong file (sau bang task),
+    // trong khi script nay nam NGAY SAU form loc o DAU trang va chay NGAY luc parse toi day -
+    // tuc la #pagination CHUA duoc parse vao DOM luc script chay. document.getElementById() goi
+    // luc nay se tra ve null, gan listener len phan tu khong ton tai se khong co tac dung (bug
+    // that: lan dau bam doi so dong khong lam gi ca). #pagination cung con bi thay the toan bo
+    // moi lan applyFilters() swap lai (giong tbody) nen ke ca goi lai sau khi DOM san sang, 1
+    // listener gan truc tiep se mat tac dung sau lan swap dau tien.
+    // Fix bang event delegation: gan DUY NHAT 1 listener 'change' len document (luon ton tai
+    // tu dau, khong phu thuoc con nao da duoc parse), loc theo id cua target - hoat dong dung
+    // bat ke #page-size-select xuat hien luc nao hay bi thay the bao nhieu lan.
+    document.addEventListener('change', (e) => {
+      if (e.target && e.target.id === 'page-size-select') applyFilters();
+    });
+
+    function getPageSizeSelect() {
+      return document.getElementById('page-size-select');
+    }
+
+    function applyFilters() {
+      const q = qInput ? qInput.value : '';
+      const status = statusInput ? statusInput.value : '';
+      const pageSizeSelect = getPageSizeSelect();
+      const pageSize = pageSizeSelect ? pageSizeSelect.value : '';
+      const url = `/tasks?q=${encodeURIComponent(q)}&status=${encodeURIComponent(status)}${pageSize ? `&page_size=${encodeURIComponent(pageSize)}` : ''}`;
+      const seq = ++requestSeq;
+
+      fetch(url, { headers: { Accept: 'text/html' } })
+        .then((res) => {
+          if (!res.ok) throw new Error(`unexpected status ${res.status}`);
+          return res.text();
+        })
+        .then((html) => {
+          if (seq !== requestSeq) return; // co request moi hon da/dang chay - bo qua response nay
+
+          const doc = new DOMParser().parseFromString(html, 'text/html');
+
+          const table = document.querySelector('table.responsive-table');
+          const newTbody = doc.querySelector('table.responsive-table tbody');
+          if (table && newTbody) {
+            const oldTbody = table.querySelector('tbody');
+            if (oldTbody) oldTbody.replaceWith(newTbody);
+            // wireUpTaskRows() dinh nghia global o khoi script phia duoi (bulk toolbar +
+            // auto-deploy) - wire lai listener cho checkbox/nut vua duoc thay the trong tbody.
+            // Sau khi thay tbody, tap ket qua da doi nen bulk toolbar duoc wireUpTaskRows() ->
+            // refresh() ve "Da chon 0 task", chap nhan duoc, khong can khoi phuc tick cu.
+            if (typeof wireUpTaskRows === 'function') wireUpTaskRows();
+          }
+
+          const pagination = document.getElementById('pagination');
+          const newPagination = doc.getElementById('pagination');
+          if (pagination && newPagination) pagination.replaceWith(newPagination);
+
+          // Cap nhat URL tren thanh dia chi (khong reload) de F5/bookmark giu dung bo loc, va
+          // de khoi polling ben duoi (fetch location.pathname + location.search) tiep tuc dung
+          // dung query hien tai. Dung replaceState (khong phai pushState) de tranh phinh history.
+          history.replaceState(null, '', url);
+        })
+        .catch(() => {
+          // Loi mang tam thoi: bo qua am tham, giu nguyen bang hien tai - giong pattern cua
+          // khoi polling ben duoi, khong alert/xoa bang.
+        });
+    }
+
+    // Chan submit mac dinh cua form - nguoi dung bam Enter trong o q HOAC bam nut submit
+    // "Tim kiem" deu trigger cung mot su kien 'submit' nay. Neu khong chan, trinh duyet se tu
+    // dieu huong GET /tasks?q=...&status=... nhu binh thuong (full reload). Ap dung ngay
+    // applyFilters() - day la hanh dong "submit" tuong minh cua nguoi dung (khong con
+    // auto-fetch theo tung phim go nua).
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      applyFilters();
+    });
+
+    if (toggle && panel && statusInput) {
+      toggle.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const open = panel.classList.toggle('open');
+        toggle.setAttribute('aria-expanded', open);
+      });
+      document.addEventListener('click', (e) => {
+        if (!panel.contains(e.target) && e.target !== toggle) {
+          panel.classList.remove('open');
+          toggle.setAttribute('aria-expanded', 'false');
+        }
+      });
+      panel.querySelectorAll('a[data-status-value]').forEach((a) => {
+        a.addEventListener('click', (e) => {
+          e.preventDefault();
+          statusInput.value = a.dataset.statusValue;
+          if (statusLabel) statusLabel.textContent = a.dataset.statusValue || 'Tất cả trạng thái';
+          if (statusDot) {
+            if (a.dataset.dotColor) {
+              statusDot.style.background = a.dataset.dotColor;
+              statusDot.style.display = '';
+            } else {
+              statusDot.style.display = 'none';
+            }
+          }
+          panel.querySelectorAll('.status-filter-option').forEach((opt) => opt.classList.toggle('active', opt === a));
+          panel.classList.remove('open');
+          toggle.setAttribute('aria-expanded', 'false');
+          applyFilters(); // chon status -> ap dung ngay, khong debounce
+        });
+      });
+    }
+  })();
+</script>
+
+<div class="card">
+  <form id="bulk-cancel-form" class="ajax-form" method="post" action="/tasks/bulk/cancel">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  </form>
+  <form id="bulk-reject-form" class="ajax-form" method="post" action="/tasks/bulk/reject" data-confirm-style="danger">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  </form>
+  <form id="bulk-approve-form" class="ajax-form" method="post" action="/tasks/bulk/approve">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  </form>
+  <form id="bulk-run-form" class="ajax-form" method="post" action="/tasks/bulk/run" data-confirm-style="run">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  </form>
+  {% if user.can_delete_task %}
+  <form id="bulk-delete-form" class="ajax-form" method="post" action="/tasks/bulk/delete" data-confirm-style="danger">
+    <input type="hidden" name="next" value="{{ next_url }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+  </form>
+  {% endif %}
+
+  <div id="bulk-toolbar" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center; margin-bottom:1rem;">
+    <span id="bulk-count" style="font-size:0.85rem; color:#555;">Đã chọn 0 task</span>
+    <button type="submit" form="bulk-cancel-form" class="secondary" id="bulk-cancel-btn" disabled>Cancel</button>
+    <button type="submit" form="bulk-reject-form" class="danger" id="bulk-reject-btn" disabled>Reject</button>
+    <button type="submit" form="bulk-approve-form" id="bulk-approve-btn" disabled>Approve</button>
+    <button type="submit" form="bulk-run-form" class="run" id="bulk-run-btn" disabled>Run</button>
+    {% if user.can_delete_task %}
+    <button type="submit" form="bulk-delete-form" class="btn-delete" id="bulk-delete-btn" style="margin-left:auto;" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+        <path d="M3 6h18"/><path d="M8 6V4a2 2 0 012-2h4a2 2 0 012 2v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/>
+      </svg>
+      Xóa
+    </button>
+    {% endif %}
+  </div>
+
+  <table class="responsive-table">
+    <thead>
+      <tr>
+        <th><input type="checkbox" id="select-all"></th>
+        <th>ID</th><th>Application</th><th>Project</th><th>Commit ID</th><th>Config</th><th>Mục đích</th><th>Email</th><th>Status</th><th class="col-auto-header">Auto</th><th>Thời gian</th><th>Thao tác</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for t in tasks %}
+      {# not_terminal: dung cho Approve/Reject/Run/Auto-toggle - Queued (da vao hang doi,
+         cho worker chay) KHONG con cho phep cac hanh dong nay nua, khac voi Cancel (xem
+         can_cancel_status ben duoi) van con huy duoc vi worker CHUA thuc su chay git. #}
+      {% set not_terminal = t.status.value not in ['Done', 'Rejected', 'Cancelled', 'Running', 'Queued'] %}
+      {# can_cancel_status: rieng cho Cancel - GIONG not_terminal cu TRUOC KHI co Queued (chi
+         chan Done/Rejected/Cancelled/Running), vi task dang Queued van huy an toan duoc
+         (worker chua chiem git lock/push gi ca). #}
+      {% set can_cancel_status = t.status.value not in ['Done', 'Rejected', 'Cancelled', 'Running'] %}
+      {% set can_cancel = (t.email == user.email or user.can_approve(t.project, t.application)) and can_cancel_status %}
+      {% set can_delete_row = user.can_delete_task and t.status.value in ['Rejected', 'Cancelled', 'Done'] %}
+      {% set can_select = can_delete_row or can_cancel or (not_terminal and user.can_run(t.project, t.application)) %}
+      <tr data-id="{{ t.id }}" data-status="{{ t.status.value }}">
+        <td>
+          <input type="checkbox" class="task-select" value="{{ t.id }}" data-has-config="{{ '1' if t.config_env else '' }}"
+            data-can-cancel="{{ '1' if can_cancel else '' }}"
+            data-can-approve="{{ '1' if (user.can_approve(t.project, t.application) and not_terminal) else '' }}"
+            data-can-run="{{ '1' if (user.can_run(t.project, t.application) and not_terminal) else '' }}"
+            data-can-delete="{{ '1' if can_delete_row else '' }}"
+            {% if not can_select %}disabled{% endif %}>
+        </td>
+        <td data-label="ID">{{ t.id }}</td>
+        <td data-label="Application">{{ t.application }}</td>
+        <td data-label="Project">{{ t.project }}</td>
+        <td data-label="Commit ID">{{ t.commitid }}</td>
+        <td data-label="Config">
+          {% if t.config_env %}
+          <svg title="Có config" viewBox="0 0 24 24" fill="none" stroke="#1bc5bd" stroke-width="2.4" width="16" height="16">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75l2.25 2.25L15 9.75M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          {% else %}
+          <svg title="Không có config" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.4" width="16" height="16">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M18.364 18.364A9 9 0 105.636 5.636a9 9 0 0012.728 12.728zM5.636 5.636l12.728 12.728"/>
+          </svg>
+          {% endif %}
+        </td>
+        <td data-label="Mục đích">{{ t.updatefor or '-' }}</td>
+        <td data-label="Email">{{ t.email }}</td>
+        <td data-label="Status"><span class="badge badge-{{ t.status.value }}">{{ t.status.value }}</span></td>
+        <td data-label="Auto">
+          <form class="inline ajax-form auto-deploy-form" method="post" action="/tasks/{{ t.id }}/auto-deploy">
+            <input type="hidden" name="next" value="{{ next_url }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+            <input type="hidden" name="enabled" value="{{ '0' if t.auto_deploy else '1' }}">
+            <input type="hidden" name="auto_run_at" value="">
+            <div class="auto-deploy-cell">
+              <button type="submit" class="switch auto-toggle {{ 'on' if t.auto_deploy }}"
+                data-has-config="{{ '1' if t.config_env else '' }}"
+                {% if not (user.can_approve(t.project, t.application) and not_terminal) %}disabled{% endif %}
+                title="{% if t.auto_deploy %}Auto lúc {{ t.auto_run_at | gmt7 | dmy }} (giờ VN){% else %}Bật Auto deploy{% endif %}">
+              </button>
+              {% if t.auto_deploy and t.auto_run_at %}
+              <span class="auto-deploy-time">{{ (t.auto_run_at | gmt7).strftime('%d/%m/%Y %H:%M') }}</span>
+              {% endif %}
+            </div>
+          </form>
+        </td>
+        <td data-label="Thời gian">
+          <div class="time-cell">
+            <span class="time-created">{{ t.created_at | gmt7 | dmy }}</span>
+            <span class="time-planned">{% if t.confirmed_run_at %}<svg class="time-planned-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>{% endif %}{{ t.confirmed_run_at | gmt7 | dmy or '-' }}</span>
+          </div>
+        </td>
+        <td data-label="Thao tác">
+          <div class="task-actions">
+            <form class="inline ajax-form" method="post" action="/tasks/{{ t.id }}/cancel" data-confirm="Bạn có chắc muốn Cancel request này?">
+              <input type="hidden" name="next" value="{{ next_url }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+              <button type="submit" class="secondary" {% if not can_cancel %}disabled{% endif %}>Cancel</button>
+            </form>
+
+            <form class="inline ajax-form" method="post" action="/tasks/{{ t.id }}/reject" data-confirm="Bạn có chắc muốn Reject request này?" data-confirm-style="danger">
+              <input type="hidden" name="next" value="{{ next_url }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+              <button type="submit" class="danger" {% if not (user.can_approve(t.project, t.application) and not_terminal) %}disabled{% endif %}>Reject</button>
+            </form>
+
+            <form class="inline ajax-form" method="post" action="/tasks/{{ t.id }}/approve" data-confirm="Bạn có chắc muốn Approve request này?">
+              <input type="hidden" name="next" value="{{ next_url }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+              <button type="submit" {% if not (user.can_approve(t.project, t.application) and not_terminal) %}disabled{% endif %}>Approve</button>
+            </form>
+
+            <form class="inline ajax-form" method="post" action="/tasks/{{ t.id }}/run"
+              {% if t.config_env %}data-confirm="Task này có Config/SQL riêng — xác nhận bạn đã cập nhật đúng config trước khi Run?" data-confirm-style="run"{% endif %}>
+              <input type="hidden" name="next" value="{{ next_url }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+              <button type="submit" class="run" {% if not (user.can_run(t.project, t.application) and not_terminal) %}disabled{% endif %}>Run</button>
+            </form>
+
+            {% if t.status.value == 'Done' and t.is_rollback_window_open(rollback_allowed_seconds) %}
+            <form class="inline" method="get" action="/tasks/{{ t.id }}/rollback">
+              <input type="hidden" name="next" value="{{ next_url }}">
+              <button type="submit" class="secondary" {% if not user.can_run(t.project, t.application) %}disabled{% endif %}>Rollback</button>
+            </form>
+            {% endif %}
+
+            <a href="/tasks/{{ t.id }}" title="Xem chi tiết" class="icon-btn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z"/>
+                <circle cx="12" cy="12" r="3"/>
+              </svg>
+            </a>
+          </div>
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="12">Không có request nào</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div id="pagination" class="pagination">
+    {% if page > 1 %}
+    <a class="page-btn" href="/tasks?page={{ page - 1 }}&q={{ q | urlencode }}&status={{ status | urlencode }}&page_size={{ page_size }}" aria-label="Trang trước">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M15 18l-6-6 6-6"/></svg>
+    </a>
+    {% else %}
+    <span class="page-btn disabled" aria-label="Trang trước" aria-disabled="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M15 18l-6-6 6-6"/></svg>
+    </span>
+    {% endif %}
+
+    {% for p in page_items %}
+      {% if p is none %}
+      <span class="page-ellipsis">…</span>
+      {% else %}
+      <a class="page-btn{{ ' active' if p == page else '' }}" href="/tasks?page={{ p }}&q={{ q | urlencode }}&status={{ status | urlencode }}&page_size={{ page_size }}">{{ p }}</a>
+      {% endif %}
+    {% endfor %}
+
+    {% if page < total_pages %}
+    <a class="page-btn" href="/tasks?page={{ page + 1 }}&q={{ q | urlencode }}&status={{ status | urlencode }}&page_size={{ page_size }}" aria-label="Trang sau">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M9 18l6-6-6-6"/></svg>
+    </a>
+    {% else %}
+    <span class="page-btn disabled" aria-label="Trang sau" aria-disabled="true">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M9 18l6-6-6-6"/></svg>
+    </span>
+    {% endif %}
+
+    <div style="margin-left:auto; display:flex; align-items:center; gap:0.4rem; font-size:0.85rem; color:#4b5563;">
+      <label for="page-size-select">Rows per page</label>
+      <select id="page-size-select" style="padding:0.3rem 0.5rem; font-size:0.85rem;">
+        <option value="10" {% if page_size == 10 %}selected{% endif %}>10</option>
+        <option value="20" {% if page_size == 20 %}selected{% endif %}>20</option>
+        <option value="50" {% if page_size == 50 %}selected{% endif %}>50</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="auto-deploy-modal">
+  <div class="modal-box">
+    <p>Chọn thời gian tự động deploy (giờ Việt Nam, GMT+7):</p>
+    <input type="text" id="auto-deploy-time" placeholder="dd/mm/yyyy hh:mm" pattern="\d{2}/\d{2}/\d{4} \d{2}:\d{2}" autocomplete="off" style="width:100%; margin-bottom:1rem;">
+    <label id="auto-deploy-config-row" style="display:none; align-items:flex-start; gap:0.5rem; font-size:0.85rem; margin-bottom:1.25rem;">
+      <input type="checkbox" id="auto-deploy-config-confirm" style="margin-top:0.2rem;">
+      <span>Task này có Config/SQL riêng — tôi xác nhận <b>đã cập nhật đúng config</b> trước khi bật Auto deploy (vì đến giờ hẹn hệ thống sẽ tự Run, không có ai kiểm tra lại).</span>
+    </label>
+    <div class="modal-actions">
+      <button type="button" class="secondary" id="auto-deploy-cancel">Huỷ</button>
+      <button type="button" id="auto-deploy-ok">Bật Auto</button>
+    </div>
+  </div>
+</div>
+
+<script>
+  // rowWireFns: danh sach cac ham "wire lai listener cho phan tu BEN TRONG tbody" duoc
+  // dang ky boi tung khoi ben duoi (checkbox chon dong, nut auto-toggle). Phai goi lai
+  // sau moi lan polling thay <tbody> moi (xem khoi polling o cuoi file), vi DOM moi KHONG
+  // tu ke thua listener cua DOM cu. Cac phan tu CO DINH ngoai tbody (select-all, nut bulk,
+  // modal) chi can wire 1 lan luc load, khong can dang ky vao day.
+  const rowWireFns = [];
+  function wireUpTaskRows() {
+    rowWireFns.forEach((fn) => fn());
+  }
+
+  (function () {
+    const selectAll = document.getElementById('select-all');
+    const countLabel = document.getElementById('bulk-count');
+    const bulkButtons = {
+      cancel: document.getElementById('bulk-cancel-btn'),
+      reject: document.getElementById('bulk-reject-btn'),
+      approve: document.getElementById('bulk-approve-btn'),
+      run: document.getElementById('bulk-run-btn'),
+      delete: document.getElementById('bulk-delete-btn'),
+    };
+
+    function checkboxes() {
+      return Array.from(document.querySelectorAll('.task-select'));
+    }
+    function selectableCheckboxes() {
+      return checkboxes().filter((cb) => !cb.disabled);
+    }
+    function selectedIds() {
+      return checkboxes().filter((cb) => cb.checked).map((cb) => cb.value);
+    }
+
+    // Dem so checkbox dang tick co data-attribute quyen tuong ung bang '1'. Doc truc tiep
+    // tu DOM moi lan goi (khong cache) de luon dung du tbody vua bi polling thay the.
+    function countCheckedWithFlag(flag) {
+      return checkboxes().filter((cb) => cb.checked && cb.dataset[flag] === '1').length;
+    }
+
+    function refresh() {
+      const ids = selectedIds();
+      countLabel.textContent = `Đã chọn ${ids.length} task`;
+      if (bulkButtons.cancel) bulkButtons.cancel.disabled = countCheckedWithFlag('canCancel') === 0;
+      if (bulkButtons.reject) bulkButtons.reject.disabled = countCheckedWithFlag('canApprove') === 0;
+      if (bulkButtons.approve) bulkButtons.approve.disabled = countCheckedWithFlag('canApprove') === 0;
+      if (bulkButtons.run) bulkButtons.run.disabled = countCheckedWithFlag('canRun') === 0;
+      if (bulkButtons.delete) bulkButtons.delete.disabled = countCheckedWithFlag('canDelete') === 0;
+    }
+
+    selectAll.addEventListener('change', () => {
+      selectableCheckboxes().forEach((cb) => { cb.checked = selectAll.checked; });
+      refresh();
+    });
+
+    function setupBulkForm(formId, verb, checkConfig) {
+      const form = document.getElementById(formId);
+      if (!form) return;
+      form.addEventListener('submit', () => {
+        if (form.dataset.confirmed === '1') return;
+        const ids = selectedIds();
+        form.querySelectorAll('input[name="task_ids"]').forEach((el) => el.remove());
+        ids.forEach((id) => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'task_ids';
+          input.value = id;
+          form.appendChild(input);
+        });
+        // Doc lai truc tiep tu checkbox tai thoi diem submit (khong cache tu luc load) de
+        // luon dung du tbody vua bi polling thay the.
+        const configCount = checkConfig
+          ? checkboxes().filter((cb) => cb.checked && cb.dataset.hasConfig === '1').length
+          : 0;
+        if (checkConfig && configCount > 0) {
+          form.setAttribute('data-confirm', `Có ${configCount} task trong số đã chọn chứa Config/secret riêng — xác nhận bạn đã cập nhật đúng config trước khi Run?`);
+        } else {
+          form.setAttribute('data-confirm', `Bạn có chắc muốn ${verb} ${ids.length} task đã chọn?`);
+        }
+      });
+    }
+    setupBulkForm('bulk-cancel-form', 'Cancel');
+    setupBulkForm('bulk-reject-form', 'Reject');
+    setupBulkForm('bulk-approve-form', 'Approve');
+    setupBulkForm('bulk-run-form', 'Run', true);
+    setupBulkForm('bulk-delete-form', 'XÓA VĨNH VIỄN');
+
+    // checkbox .task-select nam trong tbody -> phai wire lai moi khi tbody duoc polling
+    // thay the, nen dang ky vao rowWireFns thay vi chi goi 1 lan nhu truoc.
+    function wireRows() {
+      checkboxes().forEach((cb) => cb.addEventListener('change', refresh));
+      refresh();
+    }
+    rowWireFns.push(wireRows);
+    wireRows();
+  })();
+
+  // Bat Auto deploy: mo cua so chon gio truoc khi submit. Neu task co config/secret rieng,
+  // bat buoc tick xac nhan da cap nhat config truoc, vi den gio hen se tu Run khong ai kiem
+  // tra lai. Tat Auto: submit ngay, khong can chon gio/xac nhan gi.
+  (function () {
+    const autoModal = document.getElementById('auto-deploy-modal');
+    const autoTimeInput = document.getElementById('auto-deploy-time');
+    const autoOkBtn = document.getElementById('auto-deploy-ok');
+    const autoCancelBtn = document.getElementById('auto-deploy-cancel');
+    const autoConfigRow = document.getElementById('auto-deploy-config-row');
+    const autoConfigCheckbox = document.getElementById('auto-deploy-config-confirm');
+    if (!autoModal) return;
+    window.initDmyPicker(autoTimeInput);
+    let pendingAutoForm = null;
+    let pendingHasConfig = false;
+
+    function closeAutoModal() {
+      autoModal.classList.remove('open');
+      pendingAutoForm = null;
+    }
+
+    autoCancelBtn.addEventListener('click', closeAutoModal);
+    autoModal.addEventListener('click', (e) => {
+      if (e.target === autoModal) closeAutoModal();
+    });
+
+    autoOkBtn.addEventListener('click', () => {
+      // parseDmyDatetime (dinh nghia chung trong base.html) doi chuoi nguoi dung go
+      // dd/mm/yyyy hh:mm sang ISO yyyy-MM-ddThh:mm de backend van nhan dung format cho
+      // datetime.fromisoformat(...) - tra ve null neu sai dinh dang hoac ngay/gio khong
+      // co that (vd 31/02, 25:70).
+      const isoValue = window.parseDmyDatetime(autoTimeInput.value);
+      if (!isoValue) {
+        alert('Vui lòng nhập đúng định dạng dd/mm/yyyy hh:mm (ví dụ 29/07/2026 14:30).');
+        return;
+      }
+      if (pendingHasConfig && !autoConfigCheckbox.checked) {
+        alert('Vui lòng xác nhận đã cập nhật config trước khi bật Auto deploy.');
+        return;
+      }
+      const form = pendingAutoForm;
+      closeAutoModal();
+      if (form) {
+        form.querySelector('input[name="auto_run_at"]').value = isoValue;
+        form.dataset.confirmed = '1';
+        window.doAjaxSubmit(form);
+      }
+    });
+
+    // Nut .auto-toggle nam trong tbody -> phai wire lai moi khi tbody duoc polling thay
+    // the (xem rowWireFns o dau file).
+    function wireRows() {
+      document.querySelectorAll('.auto-toggle').forEach((btn) => {
+        btn.addEventListener('click', (e) => {
+          if (btn.classList.contains('on')) return;
+          e.preventDefault();
+          pendingAutoForm = btn.closest('form');
+          pendingHasConfig = btn.dataset.hasConfig === '1';
+          autoTimeInput.value = '';
+          autoConfigCheckbox.checked = false;
+          autoConfigRow.style.display = pendingHasConfig ? 'flex' : 'none';
+          autoModal.classList.add('open');
+        });
+      });
+    }
+    rowWireFns.push(wireRows);
+    wireRows();
+  })();
+
+  // Polling nhe de tu dong cap nhat status/nut Auto deploy khong can F5. Thiet ke 2 tang:
+  // (1) goi API JSON /tasks/api/statuses (chi id+status, rat nhe) moi 10s de kiem tra co
+  // gi thay doi khong; (2) CHI KHI co thay doi moi fetch lai ca trang HTML va thay tbody -
+  // tranh tai HTML lien tuc trong khi da so lan poll khong co gi doi.
+  (function () {
+    // Trang thai "con co the doi" = moi status TRU Done/Rejected/Cancelled. Running van
+    // phai poll tiep vi scheduler tu chuyen Running -> Done o nen (xem app/scheduler.py:
+    // job_check_running_done).
+    const TERMINAL_STATUSES = ['Done', 'Rejected', 'Cancelled'];
+    const POLL_INTERVAL_MS = 10000;
+
+    const table = document.querySelector('table.responsive-table');
+    if (!table) return;
+
+    // Luon truy van lai <tbody> hien tai tu table (khong cache bien) vi khoi live-search filter
+    // o tren (applyFilters()) co the thay the tbody DOC LAP voi khoi polling nay. Neu cache 1
+    // bien tbody co dinh, sau khi filter thay tbody thi bien do se tro toi node da bi go khoi
+    // DOM (detached), khien moi thao tac tiep theo cua polling (doc checkbox, replaceWith) sai/
+    // vo hieu am tham.
+    function currentTbody() {
+      return table.querySelector('tbody');
+    }
+
+    function trackedRows() {
+      const body = currentTbody();
+      if (!body) return [];
+      return Array.from(body.querySelectorAll('tr[data-id]')).filter(
+        (tr) => TERMINAL_STATUSES.indexOf(tr.dataset.status) === -1
+      );
+    }
+
+    function isAutoDeployModalOpen() {
+      const modal = document.getElementById('auto-deploy-modal');
+      return !!modal && modal.classList.contains('open');
+    }
+
+    async function poll() {
+      if (document.visibilityState !== 'visible') return; // tab khong active, bo qua luot nay
+
+      const rows = trackedRows();
+      if (rows.length === 0) return;
+
+      let latest;
+      try {
+        const qs = new URLSearchParams({ ids: rows.map((tr) => tr.dataset.id).join(',') });
+        const res = await fetch(`/tasks/api/statuses?${qs}`, { headers: { Accept: 'application/json' } });
+        if (!res.ok) return;
+        latest = await res.json();
+      } catch (err) {
+        return; // loi mang tam thoi - bo qua luot nay, thu lai o lan poll ke tiep
+      }
+
+      const statusById = {};
+      latest.forEach((item) => { statusById[String(item.id)] = item.status; });
+
+      const hasChange = rows.some((tr) => {
+        const newStatus = statusById[tr.dataset.id];
+        return newStatus !== undefined && newStatus !== tr.dataset.status;
+      });
+      if (!hasChange) return; // truong hop pho bien nhat: khong co gi doi, khong fetch lai HTML
+
+      // Modal Auto deploy dang mo -> khong thay tbody luot nay de tranh detach form modal
+      // khi user dang thao tac, doi luot poll ke tiep.
+      if (isAutoDeployModalOpen()) return;
+
+      const body = currentTbody();
+      if (!body) return;
+
+      const checkedIds = new Set(
+        Array.from(body.querySelectorAll('.task-select:checked')).map((cb) => cb.value)
+      );
+
+      let html;
+      try {
+        const res = await fetch(location.pathname + location.search, { headers: { Accept: 'text/html' } });
+        if (!res.ok) return;
+        html = await res.text();
+      } catch (err) {
+        return;
+      }
+
+      const newTbody = new DOMParser().parseFromString(html, 'text/html').querySelector('table.responsive-table tbody');
+      if (!newTbody) return;
+
+      // Doc lai currentTbody() ngay truoc khi thay, vi giua 2 lan await o tren, khoi live-search
+      // filter co the da thay tbody roi (tbody hien tai co the khac voi bien body da doc o dau
+      // ham nay).
+      const liveBody = currentTbody();
+      if (!liveBody) return;
+      liveBody.replaceWith(newTbody);
+      newTbody.querySelectorAll('.task-select').forEach((cb) => {
+        if (checkedIds.has(cb.value)) cb.checked = true;
+      });
+
+      wireUpTaskRows();
+    }
+
+    if (trackedRows().length > 0) {
+      setInterval(poll, POLL_INTERVAL_MS);
+    }
+  })();
+</script>
+{% endblock %}

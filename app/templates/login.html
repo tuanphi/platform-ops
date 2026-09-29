@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2250%22 y=%2255%22 font-size=%2272%22 text-anchor=%22middle%22 dominant-baseline=%22central%22>%F0%9F%9A%80</text></svg>">
+  <title>Đăng nhập - form-deploy</title>
+  <style>
+    body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f5f6f8; }
+    .card { background: #fff; padding: 2rem; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); width: 320px; text-align: center; }
+    a.btn, button { display: block; width: 100%; box-sizing: border-box; padding: 0.6rem; margin-top: 0.75rem; border-radius: 6px; border: none; background: #3699FF; color: #fff; text-decoration: none; cursor: pointer; font-size: 1rem; }
+    a.btn.google-btn {
+      display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+      background: #fff; color: #3c4043; border: 1px solid #dadce0; font-weight: 500;
+    }
+    a.btn.google-btn:hover { background: #f8f9fa; }
+    .google-btn svg { flex-shrink: 0; }
+    input[type="email"], input[type="password"] {
+      width: 100%; padding: 0.65rem 0.85rem; margin-top: 0.6rem; box-sizing: border-box;
+      border: 1px solid #d1d5db; border-radius: 8px; font-size: 0.95rem; color: #111827;
+      background: #fff; transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    input[type="email"]::placeholder, input[type="password"]::placeholder { color: #9ca3af; }
+    input[type="email"]:focus, input[type="password"]:focus {
+      outline: none; border-color: #3699FF; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.15);
+    }
+    hr { margin: 1.5rem 0; }
+    .remember-row { display: flex; align-items: center; justify-content: flex-end; gap: 0.35rem; margin-top: 0.5rem; }
+    .remember-row input { width: auto; margin: 0; }
+    .remember-row label { font-size: 0.85rem; color: #555; cursor: pointer; }
+
+    .brand { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.4rem; margin-bottom: 1.5rem; }
+    .brand img { width: 60px; height: 60px; flex-shrink: 0; }
+    .brand h2 { margin: 0; }
+    .maintainer { margin-top: 1rem; font-size: 0.75rem; color: #9ca3af; text-align: center; }
+    .maintainer a { color: inherit; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="brand">
+      <img src="/static/favicon.png" alt="">
+      <h2>DevOps Platform</h2>
+    </div>
+
+    {% if error %}
+      <p style="color:#F64E60; font-size:0.9rem;">{{ error }}</p>
+    {% endif %}
+
+    {% if google_enabled %}
+      <a class="btn google-btn" href="/auth/google">
+        <svg width="20" height="20" viewBox="0 0 48 48">
+          <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/>
+          <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.9-2.26 5.36-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/>
+          <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
+          <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
+        </svg>
+        Đăng nhập với Google
+      </a>
+    {% endif %}
+
+    {% if password_enabled %}
+      {% if google_enabled %}<hr>{% endif %}
+      <form method="post" action="/auth/login">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="email" name="email" placeholder="email@company.com" required>
+        <input type="password" name="password" placeholder="Mật khẩu" required>
+        <div class="remember-row">
+          <input type="checkbox" id="remember" name="remember" value="1" checked>
+          <label for="remember">Ghi nhớ đăng nhập</label>
+        </div>
+        <button type="submit">Đăng nhập</button>
+      </form>
+    {% endif %}
+
+    {% if dev_mode %}
+      {% if google_enabled or password_enabled %}<hr>{% endif %}
+      <form method="post" action="/auth/dev-login">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="email" name="email" placeholder="email@company.com" required>
+        <button type="submit">Đăng nhập (dev mode)</button>
+      </form>
+    {% endif %}
+  </div>
+
+  <p class="maintainer">© 2026 Gpay DevOps · Contact: <a href="mailto:quynhnx@g-pay.vn">quynhnx@g-pay.vn</a></p>
+</body>
+</html>

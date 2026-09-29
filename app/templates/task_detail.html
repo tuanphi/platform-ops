@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Task #{{ task.id }}{% endblock %}
+{% set next_url = request.url.path ~ ('?' ~ request.url.query if request.url.query else '') %}
+{% block content %}
+{% if not task %}
+<div class="card">Không tìm thấy task.</div>
+{% else %}
+<div class="card">
+  <h2>Task #{{ task.id }} <span class="badge badge-{{ task.status.value }}">{{ task.status.value }}</span></h2>
+  <table>
+    <tr><th>Application</th><td>{{ task.application }}</td></tr>
+    <tr><th>Project</th><td>{{ task.project }}</td></tr>
+    <tr><th>Commit ID</th><td>{{ task.commitid }}</td></tr>
+    <tr><th>Image version</th><td>{{ task.image_version or '-' }}</td></tr>
+    <tr><th>Người tạo</th><td>{{ task.email }}</td></tr>
+    <tr><th>Người approve/reject</th><td>{{ task.maintainer_confirmed or '-' }}</td></tr>
+    <tr><th>Người run</th><td>{{ task.maintainer_run or '-' }}</td></tr>
+    <tr><th>Thời gian run dự kiến (Manual)</th><td>{{ task.confirmed_run_at | gmt7 | dmy or '-' }}</td></tr>
+    <tr><th>Auto deploy</th><td>{% if task.auto_deploy %}Bật — {{ task.auto_run_at | gmt7 | dmy }} (giờ VN){% else %}Tắt{% endif %}</td></tr>
+    <tr><th>Run at</th><td>{{ task.run_at | gmt7 | dmy or '-' }}</td></tr>
+    <tr><th>Done at</th><td>{{ task.done_at | gmt7 | dmy or '-' }}</td></tr>
+    <tr><th>Config/SQL</th><td><pre>{{ task.config_env or '-' }}</pre></td></tr>
+  </table>
+
+  {# Xem chu thich chi tiet ve not_terminal/can_cancel_status trong task_list.html - Queued
+     bi loai khoi not_terminal (khong con Approve/Reject/Run duoc) nhung VAN duoc phep
+     Cancel (can_cancel_status rieng, khong doi so voi truoc khi co Queued). #}
+  {% set not_terminal = task.status.value not in ['Done', 'Rejected', 'Cancelled', 'Running', 'Queued'] %}
+  {% set can_cancel_status = task.status.value not in ['Done', 'Rejected', 'Cancelled', 'Running'] %}
+  {% set can_cancel = (task.email == user.email or user.can_approve(task.project, task.application)) and can_cancel_status %}
+  <div style="margin-top:1rem; display:flex; gap:0.5rem; flex-wrap:wrap; align-items:center;">
+    <form class="inline ajax-form" method="post" action="/tasks/{{ task.id }}/cancel" data-confirm="Bạn có chắc muốn Cancel request này?">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+      <button type="submit" class="secondary" {% if not can_cancel %}disabled{% endif %}>Cancel</button>
+    </form>
+
+    <form class="inline ajax-form" method="post" action="/tasks/{{ task.id }}/reject" data-confirm="Bạn có chắc muốn Reject request này?" data-confirm-style="danger">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+      <button type="submit" class="danger" {% if not (user.can_approve(task.project, task.application) and not_terminal) %}disabled{% endif %}>Reject</button>
+    </form>
+
+    <form class="inline ajax-form" method="post" action="/tasks/{{ task.id }}/approve" style="display:flex; gap:0.5rem; align-items:center;" data-confirm="Bạn có chắc muốn Approve request này?">
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+      <button type="submit" {% if not (user.can_approve(task.project, task.application) and not_terminal) %}disabled{% endif %}>Approve</button>
+    </form>
+
+    <form class="inline ajax-form" method="post" action="/tasks/{{ task.id }}/run"
+      {% if task.config_env %}data-confirm="Task này có Config/SQL riêng — xác nhận bạn đã cập nhật đúng config trước khi Run?" data-confirm-style="run"{% endif %}>
+      <input type="hidden" name="next" value="{{ next_url }}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+      <button type="submit" class="run" {% if not (user.can_run(task.project, task.application) and not_terminal) %}disabled{% endif %}>Run</button>
+    </form>
+
+    {% if task.status.value == 'Done' and task.is_rollback_window_open(rollback_allowed_seconds) %}
+    <form class="inline" method="get" action="/tasks/{{ task.id }}/rollback">
+      <button type="submit" class="secondary" {% if not user.can_run(task.project, task.application) %}disabled{% endif %}>Rollback</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+{% endblock %}

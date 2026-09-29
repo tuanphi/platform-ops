@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Rollback Task #{{ task.id }}{% endblock %}
+{% block content %}
+<div class="card">
+  <h2>Rollback {{ task.project }}/{{ task.application }}</h2>
+  <p>Đang chạy: <strong>{{ task.image_version }}</strong> (task #{{ task.id }})</p>
+
+  {% if not candidates %}
+  <p>Không có bản deploy trước đó để rollback về.</p>
+  <a href="/tasks/{{ task.id }}">Quay lại</a>
+  {% else %}
+  <table class="responsive-table">
+    <thead>
+      <tr>
+        <th>Task #</th><th>Image version</th><th>CommitID</th><th>Chạy lúc</th><th>Người chạy</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in candidates %}
+      <tr>
+        <td data-label="Task #">{{ c.id }}</td>
+        <td data-label="Image version">{{ c.image_version }}</td>
+        <td data-label="CommitID">{{ c.commitid }}</td>
+        <td data-label="Chạy lúc">{{ c.run_at | gmt7 | dmy or '-' }}</td>
+        <td data-label="Người chạy">{{ c.maintainer_run or '-' }}</td>
+        <td data-label="">
+          <form method="post" action="/tasks/{{ task.id }}/rollback"
+            data-confirm="Xác nhận rollback {{ task.project }}/{{ task.application }} về version {{ c.image_version }} (task #{{ c.id }})?" data-confirm-style="danger">
+            <input type="hidden" name="target_task_id" value="{{ c.id }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+            {% if next_url %}<input type="hidden" name="next" value="{{ next_url }}">{% endif %}
+            <button type="submit" class="secondary">Rollback về đây</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p style="margin-top:1rem;"><a href="/tasks/{{ task.id }}">Huỷ, quay lại chi tiết task</a></p>
+  {% endif %}
+</div>
+{% endblock %}

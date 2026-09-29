@@ -1,0 +1,1621 @@
+<!doctype html>
+<html lang="vi">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text x=%2250%22 y=%2255%22 font-size=%2272%22 text-anchor=%22middle%22 dominant-baseline=%22central%22>%F0%9F%9A%80</text></svg>">
+  <title>{% block title %}form-deploy{% endblock %}</title>
+  <style>
+    /* App chi thiet ke theo tong sang (background/card/input deu ep mau sang cung -
+       xem body va cac rule input ben duoi), khoa color-scheme: light de trinh duyet
+       khong tu ve lai cac native control (dac biet checkbox) theo dark mode cua OS,
+       tranh checkbox hien mau den/xam dam lech theme. */
+    :root { color-scheme: light; }
+    /* Mau trang thai dung chung cho .badge-{status} VA line chart Dashboard
+       (dashboard.html) - khai bao 1 noi duy nhat de tranh lech mau giua 2 noi. */
+    :root {
+      --status-Task: #5f85b8;
+      --status-Approved: #3699FF;
+      --status-Rejected: #F64E60;
+      --status-Cancelled: #6B7280;
+      --status-Queued: #8950FC;
+      --status-Running: #f59e0b;
+      --status-Done: #1BC5BD;
+    }
+    body { font-family: -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; background: #f5f6f8; color: #1a1a1a; }
+    /* Header hien dai hoa: nen xanh navy dam (thay den thuan #000 truoc day) + shadow nhe
+       tao chieu sau; nav-links dang pill (bo tron, active co nen accent nhat) thay vi
+       gach chan don dieu; dropdown (Setting/User) doi thanh card TRANG do bong, de doc hon
+       han panel den-chu-trang cu. */
+    /* position: sticky (khong phai fixed): header dinh o dau man hinh khi cuon xuong, ca
+       PC lan mobile, nhung KHONG can chinh them padding-top cho main/body de "chua cho"
+       nhu fixed (sticky van nam trong normal flow cho toi luc cuon qua no). z-index: 50 de
+       header (va cac dropdown/menu con ben trong) luon noi tren noi dung trang (main mac
+       dinh z-index:auto) khi cuon - van THAP HON modal-overlay (100) va dmy-picker-popup
+       (60, ca 2 khong nam long trong header) de 2 lop do van hien dung tren header nhu cu. */
+    header { background: #0f172a; color: #fff; padding: 0.85rem 1.75rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; box-shadow: 0 1px 0 rgba(255,255,255,.06), 0 6px 18px rgba(0,0,0,.25); position: sticky; top: 0; z-index: 50; }
+    header a { color: #fff; text-decoration: none; font-size: 1.2rem; }
+    .header-left { display: flex; align-items: center; gap: 2rem; }
+    .nav-links { display: flex; align-items: center; flex-wrap: wrap; gap: 0.25rem; }
+    .nav-links a {
+      color: rgba(255,255,255,.72); font-size: 0.92rem; font-weight: 600;
+      padding: 0.5rem 0.9rem; border-radius: 999px; transition: background 0.15s, color 0.15s;
+    }
+    .nav-links a:hover { background: rgba(255,255,255,.08); color: #fff; }
+    .nav-links a.current { background: rgba(54,153,255,.16); color: #6cb2ff; }
+    .logo { display: flex; align-items: center; }
+    .logo img { height: 34px; width: auto; display: block; }
+    .icon-toggle { display: none; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); color: #fff; width: 36px; height: 36px; border-radius: 9px; align-items: center; justify-content: center; padding: 0; line-height: 0; cursor: pointer; }
+
+    .user-info { position: relative; display: flex; align-items: center; }
+    .user-chip {
+      display: inline-flex; align-items: center; gap: 0.55rem; background: rgba(255,255,255,.06);
+      border: 1px solid rgba(255,255,255,.1); padding: 0.35rem 0.7rem 0.35rem 0.35rem;
+      border-radius: 999px; cursor: pointer; color: #fff; font: inherit;
+    }
+    .user-chip:hover { background: rgba(255,255,255,.12); }
+    .user-chip .avatar {
+      width: 26px; height: 26px; border-radius: 50%; background: linear-gradient(135deg,#3699FF,#6cb2ff);
+      display: flex; align-items: center; justify-content: center; font-size: 0.72rem; font-weight: 700; color: #fff;
+      flex-shrink: 0; text-transform: uppercase;
+    }
+    .user-chip .name { font-size: 0.85rem; font-weight: 600; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .user-chip svg { width: 11px; height: 11px; color: rgba(255,255,255,.55); flex-shrink: 0; transition: transform 0.15s; }
+    .user-chip[aria-expanded="true"] svg { transform: rotate(180deg); }
+    .user-panel {
+      display: none; flex-direction: column;
+      position: absolute; top: calc(100% + 0.5rem); right: 0; min-width: 220px;
+      background: #fff; color: #1a1a1a; border-radius: 10px; padding: 0.6rem; z-index: 40;
+      box-shadow: 0 12px 30px rgba(0,0,0,.22);
+    }
+    .user-panel.open { display: flex; }
+    .user-panel .email { font-size: 0.85rem; font-weight: 600; padding: 0.3rem 0.6rem 0.15rem; }
+    .user-panel .role { font-size: 0.74rem; color: #9ca3af; padding: 0 0.6rem 0.5rem; border-bottom: 1px solid #eef1f5; margin-bottom: 0.3rem; }
+    .user-panel a { padding: 0.5rem 0.6rem; border-radius: 7px; color: #dc2626; font-size: 0.85rem; font-weight: 600; }
+    .user-panel a:hover { background: #fef2f2; }
+
+    .nav-dropdown { position: relative; }
+    .nav-dropdown-toggle {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      background: transparent; border: none; color: rgba(255,255,255,.72); font: inherit; font-size: 0.92rem; font-weight: 600;
+      padding: 0.5rem 0.9rem; border-radius: 999px; cursor: pointer; transition: background 0.15s, color 0.15s;
+    }
+    .nav-dropdown-toggle:hover { background: rgba(255,255,255,.08); color: #fff; }
+    .nav-dropdown-toggle svg { transition: transform 0.15s; }
+    .nav-dropdown-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+    .nav-dropdown-panel {
+      display: none; flex-direction: column; gap: 0.1rem;
+      position: absolute; top: 100%; left: 0; margin-top: 0.5rem; min-width: 190px;
+      background: #fff; border-radius: 10px; padding: 0.4rem; z-index: 40;
+      box-shadow: 0 12px 30px rgba(0,0,0,.22);
+    }
+    .nav-dropdown-panel.open { display: flex; }
+    .nav-dropdown-panel a { color: #1a1a1a; font-size: 0.88rem; font-weight: 500; padding: 0.5rem 0.7rem; border-radius: 7px; }
+    /* PHAI dat lai color o day: .nav-dropdown-panel nam LONG BEN TRONG .nav-links trong
+       HTML (Setting dropdown la 1 phan tu con cua nav-links), nen rule ".nav-links a:hover"
+       (doi chu sang trang, dung cho pill nav-link cap cao nhat) VAN khop voi cac the <a>
+       nay khi hover - cung specificity (0,2,1) nhu rule duoi day nhung dung PROPERTY khac
+       (color vs background) nen ca 2 deu "thang" tren property rieng cua no. Neu khong khai
+       bao lai color o day, chu se giu mau trang tu rule kia, tren nen sang #f1f5f9 gan nhu
+       khong doc duoc (bug thuc te da phat hien). */
+    .nav-dropdown-panel a:hover { background: #f1f5f9; color: #1a1a1a; }
+
+    @media (max-width: 700px) {
+      header { padding: 0.7rem 1rem; }
+      .icon-toggle { display: inline-flex; }
+      .nav-links {
+        display: none; position: absolute; top: 100%; left: 0; width: 100%;
+        background: #0f172a; flex-direction: column; align-items: stretch;
+        padding: 0.5rem 1rem 1rem; gap: 0.15rem; z-index: 30;
+      }
+      .nav-links.open { display: flex; }
+      .nav-links a { padding: 0.65rem 0.8rem; }
+      .user-chip .name { display: none; }
+    }
+    main { max-width: 1280px; margin: 1.5rem auto; padding: 0 1rem; }
+    .card { background: #fff; border-radius: 8px; padding: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,.1); margin-bottom: 1rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 0.5rem; border-bottom: 1px solid #e5e7eb; font-size: 0.9rem; }
+    .badge { display: inline-block; padding: 0.3rem 0.75rem; border-radius: 8px; font-size: 0.8rem; font-weight: 600; color: #fff; }
+    .badge-Task { background: var(--status-Task); }
+    .badge-Approved { background: var(--status-Approved); }
+    .badge-Rejected { background: var(--status-Rejected); }
+    .badge-Cancelled { background: var(--status-Cancelled); }
+    .badge-Queued { background: var(--status-Queued); }
+    .badge-Running { background: var(--status-Running); }
+    .badge-Done { background: var(--status-Done); }
+
+    /* Nut loc trang thai (task_list.html) - pill trang tren nen sang (khac .nav-dropdown-toggle
+       vi cai do danh cho header toi mau). Chua chon: vien xam trung tinh; da chon: cham mau
+       dung mau trang thai (cung bo bien --status-* voi .badge) hien ngay tren nut, khong can
+       mo panel moi biet dang loc gi. */
+    .status-filter { position: relative; }
+    .status-filter-toggle {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      background: #eef1f5; border: 1px solid #d1d5db; color: #374151;
+      font: inherit; font-size: 0.88rem; font-weight: 600;
+      padding: 0.5rem 0.95rem; border-radius: 8px; cursor: pointer;
+      transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+    }
+    .status-filter-toggle:hover { border-color: #3699FF; background: #e4e9f0; }
+    .status-filter-toggle[aria-expanded="true"] { border-color: #3699FF; box-shadow: 0 0 0 3px rgba(54,153,255,.15); }
+    .status-filter-toggle svg { color: #9ca3af; transition: transform 0.15s; flex-shrink: 0; }
+    .status-filter-toggle[aria-expanded="true"] svg { transform: rotate(180deg); }
+    .status-filter-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+    .status-filter-panel {
+      display: none; flex-direction: column; gap: 0.1rem;
+      position: absolute; top: 100%; left: 0; margin-top: 0.5rem; min-width: 190px;
+      background: #fff; border-radius: 10px; padding: 0.4rem; z-index: 5;
+      box-shadow: 0 12px 30px rgba(0,0,0,.16); border: 1px solid #eef1f5;
+    }
+    .status-filter-panel.open { display: flex; }
+    /* text-decoration khai bao ro (khong dua vao "header a"/an the khac) vi panel nay nam
+       NGOAI <header>, khong duoc thua huong reset gach chan tu do - day chinh la nguyen nhan
+       chu bi gach chan xau truoc khi doi sang class rieng nay. */
+    .status-filter-option {
+      display: flex; align-items: center; gap: 0.55rem;
+      color: #1a1a1a; text-decoration: none; font-size: 0.88rem; font-weight: 500;
+      padding: 0.5rem 0.7rem; border-radius: 7px; cursor: pointer;
+    }
+    .status-filter-option:hover { background: #f1f5f9; }
+    .status-filter-option.active { background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+    /* Toast: thong bao ket qua AJAX save (Settings/Users - xem doAjaxSubmit ben duoi), noi
+       goc tren-phai, DUOI header (header sticky cao ~4rem ke ca mobile, dat top hoi du de
+       khong de len header) va TU AN sau vai giay - thay cho .inline-flash cu (ghi thang
+       vao 1 the trong form, hien mai khong bao gio an). #toast-container dung position:
+       fixed (khong phu thuoc scroll), z-index thap hon modal-overlay (100) va
+       dmy-picker-popup (60) de 2 lop do van hien tren neu dang mo cung luc. */
+    #toast-container {
+      position: fixed; top: 4.5rem; right: 1rem; z-index: 90;
+      display: flex; flex-direction: column; gap: 0.5rem; align-items: flex-end;
+      pointer-events: none; max-width: calc(100vw - 2rem);
+    }
+    .toast {
+      pointer-events: auto; min-width: 220px; max-width: 360px; box-sizing: border-box;
+      padding: 0.7rem 1rem; border-radius: 8px; font-size: 0.88rem; line-height: 1.4;
+      display: flex; align-items: flex-start; gap: 0.5rem; box-shadow: 0 8px 24px rgba(0,0,0,.18);
+      animation: toast-in 0.2s ease-out;
+    }
+    .toast.toast-out { animation: toast-out 0.2s ease-in forwards; }
+    .toast.toast-ok { background: #dcfce7; color: #166534; }
+    .toast.toast-err { background: #fee2e2; color: #991b1b; }
+    @keyframes toast-in { from { opacity: 0; transform: translateX(16px); } to { opacity: 1; transform: none; } }
+    @keyframes toast-out { to { opacity: 0; transform: translateX(16px); } }
+    /* Mobile: bam han sang phai (giong desktop), KHONG can giua - chi thu gon khoang cach
+       canh phai va gioi han max-width theo man hinh hep. */
+    @media (max-width: 480px) {
+      #toast-container { top: 4rem; right: 0.6rem; align-items: flex-end; }
+      .toast { max-width: calc(100vw - 2rem); }
+    }
+
+    .modal-overlay {
+      display: none; position: fixed; inset: 0; background: rgba(15, 23, 42, 0.45);
+      align-items: center; justify-content: center; z-index: 100; padding: 1rem;
+    }
+    .modal-overlay.open { display: flex; }
+    .modal-box {
+      /* box-sizing: border-box BAT BUOC o day (cung ly do voi .dmy-picker-popup/.dmy-wheel-list
+         o duoi): thieu no, "width: 100%" (content-box mac dinh) chi tinh phan NOI DUNG, con
+         padding 1.5rem*2=48px bi CONG THEM ra ngoai, khien tong chieu rong thuc te tren man
+         hinh la 408px (360+48) thay vi 360px nhu max-width khai bao. Tren desktop dieu nay
+         khong ro vi con du cho, nhung tren mobile (modal-overlay chi con vai tram px sau khi
+         tru padding 1rem*2) modal-box se TRAN qua ca hai canh man hinh - day chinh la nguyen
+         nhan khu vuc chon lich auto-deploy (input, checkbox, nut Huy/Bat Auto) bi lech/vo lop
+         tren mobile ma khong lien quan gi den logic JS. max-width doi tu 360 len 408 de GIU
+         NGUYEN kich thuoc hien thi tren desktop nhu truoc (360 content-box + 48 padding = 408
+         border-box), chi thay doi cach TINH nen tren man hinh hep no tu co lai dung khong gian
+         con lai thay vi tran ra ngoai. */
+      box-sizing: border-box;
+      background: #fff; border-radius: 12px; padding: 1.5rem; width: 100%; max-width: 408px;
+      box-shadow: 0 20px 40px rgba(0,0,0,.2); animation: modal-in 0.15s ease-out;
+    }
+    @keyframes modal-in { from { opacity: 0; transform: translateY(8px) scale(0.98); } to { opacity: 1; transform: none; } }
+    .modal-box p { margin: 0 0 1.25rem; font-size: 0.95rem; color: #1a1a1a; line-height: 1.5; }
+    .modal-actions { display: flex; justify-content: flex-end; gap: 0.5rem; }
+    .modal-actions button { padding: 0.45rem 1rem; }
+    form.inline { display: inline; }
+    input, select, textarea, button { font: inherit; padding: 0.4rem; }
+    input[type="text"], input[type="email"], input[type="password"], input[type="number"],
+    input[type="date"], input[type="datetime-local"], select, textarea {
+      box-sizing: border-box; padding: 0.5rem 0.75rem; border: 1px solid #d1d5db; border-radius: 8px;
+      background: #fff; color: #111827; transition: border-color 0.15s, box-shadow 0.15s;
+    }
+    input[type="text"]::placeholder, input[type="email"]::placeholder, input[type="password"]::placeholder,
+    input[type="number"]::placeholder, textarea::placeholder { color: #9ca3af; }
+    input[type="text"]:focus, input[type="email"]:focus, input[type="password"]:focus, input[type="number"]:focus,
+    input[type="date"]:focus, input[type="datetime-local"]:focus, select:focus, textarea:focus {
+      outline: none; border-color: #3699FF; box-shadow: 0 0 0 3px rgba(54, 153, 255, 0.15);
+    }
+    /* Checkbox (multi-select danh sach, xac nhan auto-deploy...): tu ve thay vi dung
+       accent-color - dau tick cua accent-color do trinh duyet tu tinh mau tuong phan nen
+       PC (Chrome/Safari desktop) ra tick den con mobile ra tick trang, lech giao dien giua
+       2 nen tang du cung 1 accent. Tu ve dam bao LUON nen xanh + tick trang moi noi.
+       Dau tick VE BANG SVG (vector, background-image) thay vi border+rotate(45deg): cach
+       border-trick truoc day dung toa do px le (4.8/2.8/...) nen moi trinh duyet/thiet bi
+       lam tron subpixel khac nhau, PC va mobile tick van lech nhe khong deu nhau du cung 1
+       gia tri CSS - SVG la vector nen render GIONG HET NHAU moi noi, khong con lech. */
+    input[type="checkbox"] {
+      appearance: none; -webkit-appearance: none;
+      cursor: pointer; box-sizing: border-box; display: inline-block; position: relative; margin: 0;
+      width: 16px; height: 16px; vertical-align: middle;
+      border: 1.5px solid #9ca3af; border-radius: 4px; background: #fff;
+    }
+    input[type="checkbox"]:checked {
+      background-color: #3699FF; border-color: #3699FF;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='20 6 9 17 4 12'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: center; background-size: 11px 11px;
+    }
+    input[type="checkbox"]:disabled { cursor: not-allowed; opacity: 0.45; }
+    button {
+      appearance: none; -webkit-appearance: none;
+      cursor: pointer; border: none; border-radius: 6px; background: #3699FF; color: #fff; padding: 0.45rem 0.9rem;
+    }
+    button.secondary { background: #6B7280; }
+    button.danger { background: #F64E60; }
+    button.run { background: #1BC5BD; }
+
+    /* Nut Xoa vinh vien (bulk delete, Super Admin) - CO Y thiet ke khac han .danger (Reject,
+       chi doi status va con giu lai task) de khong bi nham: do dam hon + vien + icon
+       thung rac, khong bo tron nhu cac nut khac de "nghiem trong" hon. */
+    button.btn-delete {
+      display: inline-flex; align-items: center; gap: 0.35rem;
+      background: #b91c1c; color: #fff; font-weight: 700; border-radius: 6px;
+      box-shadow: inset 0 0 0 1px rgba(0,0,0,.15);
+      transition: background 0.15s;
+    }
+    button.btn-delete:hover:not(:disabled) { background: #991b1b; }
+    button.btn-delete svg { flex-shrink: 0; }
+
+    /* Nut gat (switch) - van la button submit form binh thuong, chi doi giao dien. */
+    button.switch {
+      position: relative; width: 44px; height: 24px; padding: 0; border-radius: 999px;
+      background: #6b7280; flex-shrink: 0; transition: background 0.15s;
+    }
+    button.switch::before {
+      content: ''; position: absolute; top: 2px; left: 2px;
+      width: 20px; height: 20px; border-radius: 50%; background: #fff; transition: left 0.15s;
+    }
+    button.switch.on { background: #22c55e; }
+    button.switch.on::before { left: 22px; }
+    /* opacity thay vi doi mau: giu nguyen mau nen (xanh/do/xam) nhung mo di, tranh mot so
+       trinh duyet (dac biet mobile Safari) tu y ve lai nut disabled thanh trang/xam mac dinh. */
+    button:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    /* Nut Sync hinh tron chi co icon (/catalog, /staging, /production) - khong nen, icon
+       mau xanh primary, to hon nut binh thuong. Quay (.spinning) khi: (1) nguoi dung tu bam
+       (xem doAjaxSubmit them/bo class nay truc tiep), (2) webhook tu sync xong
+       (xem window.subscribeSyncEvents ben duoi va app/services/sync_events.py). */
+    button.icon-btn {
+      width: 44px; height: 44px; border-radius: 50%; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: transparent; flex-shrink: 0;
+    }
+    button.icon-btn:hover:not(:disabled) { background: #eaf3ff; }
+    button.icon-btn svg { width: 22px; height: 22px; stroke: #3699FF; }
+    button.icon-btn.spinning svg { animation: icon-btn-spin 0.8s linear infinite; }
+    @keyframes icon-btn-spin { to { transform: rotate(360deg); } }
+
+    /* Cot "Auto" (task_list.html): nut gat + gio hen auto-deploy (khi bat) - gio hen truoc
+       day CHI hien qua tooltip title khi hover, gio hien truc tiep. Desktop: xep DOC (gio
+       nam duoi nut). Mobile (<=700px, cung breakpoint voi .responsive-table ben duoi): xep
+       NGANG (gio nam canh nut) vi o luc nay da la 1 hang flex ngang theo data-label. */
+    .col-auto-header { text-align: center; }
+    .auto-deploy-cell { display: flex; flex-direction: column; align-items: center; gap: 0.3rem; }
+    .auto-deploy-time {
+      font-size: 0.8rem; color: #6b7280; font-variant-numeric: tabular-nums; white-space: nowrap;
+    }
+    @media (max-width: 700px) {
+      .auto-deploy-cell { flex-direction: row; align-items: center; gap: 0.5rem; }
+    }
+
+    /* Cot "Thoi gian" (task_list.html, doi ten tu "Tao luc") - 2 dong: tao luc (t.created_at,
+       luon co) va du kien chay (t.confirmed_run_at, "-" neu chua dat) - CUNG dinh dang
+       dd/mm/yyyy hh:mm (filter dmy co san), khong nhan chu rieng. */
+    .time-cell { display: flex; flex-direction: column; gap: 0.15rem; }
+    .time-created { white-space: nowrap; }
+    /* Mau giong het nut Approve (button mac dinh khong class rieng, xem task_list.html) va
+       --status-Approved - lien tuong truc quan: "gio nay gan voi hanh dong Approve".
+       font-size dung don vi "em" (tuong doi voi ambient cua td, 0.9rem desktop / 0.85rem
+       mobile qua responsive-table) chu KHONG phai "rem"/px co dinh - nho vay ty le nho hon
+       .time-created van duoc giu nguyen tren ca desktop lan mobile (tranh lai bug lech co
+       chu da phat hien truoc day khi dung don vi tuyet doi). */
+    .time-planned { color: #3699FF; white-space: nowrap; font-size: 0.9em; }
+    /* Icon dong ho truoc gio du kien chay (chi render khi t.confirmed_run_at co gia tri -
+       xem task_list.html) - dung chung style voi icon lich cua DMY picker (stroke
+       currentColor de tu dong ke thua mau xanh #3699FF cua .time-planned). */
+    .time-planned-icon { vertical-align: -1px; margin-right: 3px; flex-shrink: 0; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; }
+    .stat { text-align: center; padding: 1rem; }
+    .stat .num { font-size: 2rem; font-weight: 700; }
+
+    /* Trang Home (dashboard.html) - cac the trang thai/nut truoc day dinh sat nhau, phan
+       bo lai: header rieng 1 hang co gap, nhan nho "Trang thai task" tach khu vuc, the
+       chuyen tu do bong day sang vien mong + hover noi nhe (cam giac bam duoc ro hon), gap
+       tang len tren desktop. Mobile ep co dinh 2 cot (thay vi auto-fit co gian tu do de
+       lech) cho deu hang, do dinh vao nhau hon .grid/.stat cu. */
+    .home-head-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.5rem; }
+    .home-head-row h2 { margin: 0; }
+    .home-env-row { display: flex; gap: 0.7rem; margin-bottom: 1.5rem; }
+    .home-env-row a { flex: 1; text-decoration: none; }
+    .home-env-row .home-btn { width: 100%; }
+
+    /* .home-btn: kieu nut dung chung cho Home (Staging/Production/Tao request) - gradient
+       nhe + shadow tinh te tao chieu sau (thay vi mau phang #3699FF cu), bo goc 10px dong
+       bo voi .home-stat/.home-cta ben duoi, hover nhac len + sang hon, active (bam xuong)
+       dep xuong + toi hon nhe mo phong nut vat ly bi nhan. Icon SVG dung stroke="currentColor"
+       de tu dong theo mau chu (trang), khong can khai bao stroke rieng tung icon. */
+    .home-btn {
+      display: inline-flex; align-items: center; justify-content: center; gap: 0.45rem;
+      padding: 0.7rem 1rem; border: none; border-radius: 10px; cursor: pointer;
+      font-size: 0.92rem; font-weight: 600; color: #fff; white-space: nowrap;
+      background: linear-gradient(135deg, #5fabff 0%, #3699FF 55%, #2b83e6 100%);
+      box-shadow: 0 3px 10px rgba(54,153,255,.28), inset 0 1px 0 rgba(255,255,255,.25);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+    }
+    .home-btn svg { flex-shrink: 0; }
+    .home-btn:hover { transform: translateY(-1px); filter: brightness(1.04); box-shadow: 0 6px 16px rgba(54,153,255,.38), inset 0 1px 0 rgba(255,255,255,.3); }
+    .home-btn:active { transform: translateY(0); filter: brightness(0.96); box-shadow: 0 2px 6px rgba(54,153,255,.3), inset 0 1px 0 rgba(255,255,255,.18); }
+
+    .home-section-label { font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: #9ca3af; margin: 0 0 0.75rem; }
+    .home-section-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin-bottom: 0.75rem; }
+    .home-section-row .home-section-label { margin: 0; }
+    .home-section-row .home-btn { padding: 0.55rem 0.95rem; font-size: 0.85rem; }
+
+    .home-stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; margin-bottom: 1.75rem; }
+    .home-stat {
+      text-align: center; padding: 1.15rem 0.5rem; background: linear-gradient(180deg, #ffffff 0%, #fafcff 100%);
+      border: 1px solid #eef1f5; border-radius: 12px;
+      text-decoration: none; color: inherit; display: block;
+      box-shadow: 0 1px 3px rgba(15,23,42,.05);
+      transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+    }
+    .home-stat:hover { border-color: #3699FF; box-shadow: 0 6px 16px rgba(54,153,255,.16); transform: translateY(-2px); }
+    .home-stat:active { transform: translateY(0); box-shadow: 0 2px 8px rgba(54,153,255,.15); }
+    .home-stat .num { font-size: 1.9rem; font-weight: 700; line-height: 1; margin-bottom: 0.55rem; }
+
+    /* .home-cta: van la <a> (khong phai button) de dieu huong don gian - nang cap sang
+       gradient + shadow sau, dong bo voi .home-btn o tren, cung hover/active mo phong nut bam. */
+    .home-cta {
+      display: flex; align-items: center; justify-content: center; gap: 0.5rem; width: 100%;
+      padding: 0.95rem; background: linear-gradient(135deg, #5fabff 0%, #3699FF 55%, #2b83e6 100%);
+      color: #fff; border-radius: 10px; font-size: 1rem; font-weight: 700;
+      text-decoration: none; box-sizing: border-box;
+      box-shadow: 0 4px 14px rgba(54,153,255,.3), inset 0 1px 0 rgba(255,255,255,.25);
+      transition: transform 0.15s ease, box-shadow 0.15s ease, filter 0.15s ease;
+    }
+    .home-cta svg { flex-shrink: 0; }
+    .home-cta:hover { transform: translateY(-1px); filter: brightness(1.04); box-shadow: 0 8px 20px rgba(54,153,255,.38), inset 0 1px 0 rgba(255,255,255,.3); }
+    .home-cta:active { transform: translateY(0); filter: brightness(0.96); box-shadow: 0 3px 10px rgba(54,153,255,.3), inset 0 1px 0 rgba(255,255,255,.18); }
+
+    /* Phan trang bang Staging/Production (staging.html/production.html) - an mac dinh,
+       chi hien khi > 1 trang (xem render() trong 2 file do). */
+    .table-pagination { display: none; align-items: center; justify-content: center; gap: 0.85rem; margin-top: 1rem; font-size: 0.85rem; color: #555; }
+    .table-pagination button { padding: 0.4rem 0.9rem; }
+    @media (max-width: 480px) {
+      .home-env-row { gap: 0.5rem; }
+      .home-btn { padding: 0.65rem 0.5rem; font-size: 0.82rem; gap: 0.35rem; }
+      .home-section-row .home-btn { padding: 0.5rem 0.75rem; font-size: 0.8rem; }
+      .home-stat-grid { grid-template-columns: repeat(2, 1fr); gap: 0.75rem; }
+      .home-stat { padding: 0.9rem 0.4rem; }
+      .home-stat .num { font-size: 1.6rem; }
+    }
+
+    .autocomplete { position: relative; }
+    .autocomplete-dropdown {
+      position: absolute; top: 100%; left: 0; right: 0; z-index: 20; margin-top: 2px;
+      background: #fff; border: 1px solid #d1d5db; border-radius: 6px;
+      max-height: 220px; overflow-y: auto; box-shadow: 0 4px 10px rgba(0,0,0,.12);
+    }
+    .autocomplete-item { padding: 0.5rem 0.75rem; cursor: pointer; font-size: 0.95rem; color: #1a1a1a; }
+    .autocomplete-item:hover { background: #eff6ff; }
+
+    /* Widget lich dung chung cho cac o nhap "dd/mm/yyyy hh:mm" (xem initDmyPicker o
+       script ben duoi) - bo sung cach chon bang lich/gio-phut cuon (scroll wheel) ben
+       canh go tay san co. */
+    .dmy-input-wrap { position: relative; }
+    .dmy-input-wrap input[type="text"] { width: 100%; padding-right: 2.25rem; box-sizing: border-box; }
+    .dmy-picker-toggle {
+      position: absolute; right: 4px; top: 50%; transform: translateY(-50%);
+      width: 1.8rem; height: 1.8rem; border-radius: 8px; background: transparent; color: #6b7280;
+      border: none; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; font-size: 1rem; padding: 0;
+      transition: background 0.15s, color 0.15s;
+    }
+    .dmy-picker-toggle:hover { background: #eff6ff; color: #3699FF; }
+
+    /* position:fixed (thay vi absolute neo theo .dmy-input-wrap) de JS (xem positionPopup()
+       trong initDmyPicker o script ben duoi) co the tu do dat top/left theo toa do VIEWPORT
+       va KEP (clamp) popup luon nam gon trong man hinh, ke ca khi mo tu 1 input nam gan day
+       trang/modal (vd modal "Auto deploy" trong task_list.html) - khong con phu thuoc vao
+       khong gian con lai ben trong wrap/modal-box nhu truoc (nguyen nhan bug tran viewport).
+       max-height + overflow-y: auto la lop phong ho cuoi cung cho cac vien mang bat thuong
+       (rat thap) ma ca 2 huong tren/duoi deu khong du cho toan bo popup. */
+    .dmy-picker-popup {
+      /* box-sizing: border-box BAT BUOC o day: JS (positionPopup()) tinh max-height can gan
+         dua tren TONG chieu cao khung popup (khop voi khong gian con lai thuc te tren/duoi
+         input). Neu de mac dinh content-box, max-height chi gioi han phan noi dung, con
+         padding (1rem*2=32px) + border (2px) bi CONG THEM ra ngoai, khien khung THAT SU cao
+         hon so tinh toan va lam hang dong nut cuoi (Hom nay/Huy/Chon) bi che khuat/cat mat -
+         da phat hien qua Playwright (getBoundingClientRect cua .dmy-picker-actions vuot qua
+         canh duoi cua .dmy-picker-popup) khi kiem tra thuc te. width doi tu 288 len 320 (=
+         288 + 2*16 padding cu) de GIU NGUYEN kich thuoc hien thi that su nhu truoc (truoc day
+         popup khong khai bao box-sizing nen da render o 320px do content-box + padding). */
+      box-sizing: border-box;
+      display: none; position: fixed; z-index: 60; top: 0; left: 0;
+      background: #fff; border: 1px solid #eef1f5; border-radius: 16px;
+      box-shadow: 0 2px 4px rgba(15,23,42,.04), 0 12px 24px -8px rgba(15,23,42,.15), 0 24px 48px -14px rgba(15,23,42,.18);
+      /* width dung min(320px, calc(100vw - 16px)) thay vi 320px co dinh: tren man hinh hep
+         (vd 320-360px, nam trong modal Auto deploy o task_list.html) 320px CONG THEM 2 * 8px
+         VIEWPORT_MARGIN (xem positionPopup() ben duoi) da vuot qua be ngang man hinh, khien
+         popup luon bi JS ep left ve sat mep trai (8px) nhung phan du van TRAN qua mep phai -
+         day chinh la nguyen nhan popup lich bi lech/tran ngang tren mobile. Dung min() de popup
+         tu co lai vua khung nhin (16px = 2 * VIEWPORT_MARGIN, dam bao khop voi cong thuc JS
+         dang dung de tinh left/maxLeft). Tren desktop (100vw luon >> 320+16) min() van chon
+         320px nhu cu, KHONG doi gi hien thi hien tai. */
+      padding: 1rem; width: min(320px, calc(100vw - 16px)); max-height: calc(100vh - 16px); overflow-y: auto;
+      overscroll-behavior: contain;
+      opacity: 0; transform: translateY(-8px) scale(0.97); pointer-events: none;
+      transition: opacity 0.16s ease-out, transform 0.16s ease-out;
+    }
+    .dmy-picker-popup.open { display: block; }
+    /* Khi popup duoc JS quyet dinh mo LEN TREN input (khong du cho o duoi) - chi doi chieu
+       animation truot (tu duoi len) cho tu nhien hon, vi tri top/left thuc te van do JS
+       (positionPopup()) tinh va gan truc tiep qua inline style. */
+    .dmy-picker-popup.dmy-flip-up { transform: translateY(8px) scale(0.97); }
+    /* .dmy-show duoc JS them 1 frame SAU khi .open (display:none -> block) de transition o
+       tren thuc su chay (doi voi trinh duyet, chuyen thang tu display:none sang opacity:1
+       cung luc se khong co hieu ung vi khong co frame trung gian o trang thai opacity:0). */
+    .dmy-picker-popup.open.dmy-show { opacity: 1; transform: none; pointer-events: auto; }
+
+    .dmy-picker-nav { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.65rem; font-size: 0.95rem; font-weight: 700; color: #1a1a1a; }
+    .dmy-picker-nav button {
+      background: transparent; color: #374151; padding: 0; width: 1.9rem; height: 1.9rem; border-radius: 8px;
+      display: inline-flex; align-items: center; justify-content: center; font-size: 1.05rem;
+    }
+    .dmy-picker-nav button:hover { background: #eff6ff; color: #3699FF; }
+
+    .dmy-picker-days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; text-align: center; font-size: 0.8rem; margin-bottom: 0.6rem; }
+    .dmy-picker-days .dow { color: #9ca3af; font-weight: 700; padding: 4px 0 6px; font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.03em; }
+    .dmy-picker-days .day {
+      padding: 0.45rem 0; border-radius: 999px; cursor: pointer; color: #1f2937;
+      transition: background 0.12s, color 0.12s;
+    }
+    .dmy-picker-days .day:hover { background: #eff6ff; }
+    .dmy-picker-days .day.muted { color: #d1d5db; }
+    /* Hom nay (chua chon): vien accent de phan biet voi ngay dang chon (nen dac accent). */
+    .dmy-picker-days .day.today { color: #3699FF; font-weight: 700; box-shadow: inset 0 0 0 1.5px #3699FF; }
+    .dmy-picker-days .day.selected { background: #3699FF; color: #fff; font-weight: 700; box-shadow: none; }
+
+    /* Animation nhe khi ve lai luoi ngay (mo popup / chuyen thang) - JS toggle lai class nay
+       (remove roi add) moi lan renderCalendar() de retrigger keyframe. */
+    @keyframes dmy-cal-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+    .dmy-picker-days.dmy-anim { animation: dmy-cal-in 0.16s ease-out; }
+
+    /* Cot gio/phut kieu scroll wheel (iOS-style), snap tung dong vao giua. ROW_H/so dong hien
+       thi PHAI khop voi hang so ROW_H trong initDmyPicker (script ben duoi) - JS tinh scrollTop
+       bang cong thuc dua tren cac hang so nay thay vi do DOM (popup co the dang display:none). */
+    .dmy-picker-time { display: flex; align-items: center; justify-content: center; gap: 0.6rem; margin: 0.75rem 0 0.85rem; }
+    .dmy-wheel-col { position: relative; width: 4.4rem; height: 180px; }
+    .dmy-wheel-list {
+      /* box-sizing:border-box bat buoc: neu khong, height:180px chi la content-box, cong them
+         padding 72px tren/duoi se ra chieu cao that su 324px, tran ra ngoai popup va che mat
+         click cac nut ben duoi (da phat hien qua Playwright khi test thuc te). */
+      box-sizing: border-box;
+      height: 180px; overflow-y: auto; scroll-snap-type: y mandatory;
+      -webkit-overflow-scrolling: touch; padding: 72px 0; scrollbar-width: none; border-radius: 10px;
+      /* Ngan scroll chaining: cuon het dau/cuoi cot wheel nay khong duoc "tran" tiep len cuon
+         chinh .dmy-picker-popup (popup cha, cung co the co overflow-y: auto khi khong gian
+         qua hep - xem CSS .dmy-picker-popup o tren). Neu khong, nguoi dung cuon wheel toi het
+         gio 23 se vo tinh keo ca popup cuon theo, gay ket UX. */
+      overscroll-behavior: contain;
+    }
+    .dmy-wheel-list::-webkit-scrollbar { display: none; }
+    .dmy-wheel-item {
+      height: 36px; display: flex; align-items: center; justify-content: center; box-sizing: border-box;
+      scroll-snap-align: center; font-size: 0.95rem; color: #b6bcc6; cursor: pointer;
+      user-select: none; font-variant-numeric: tabular-nums; transition: color 0.12s, font-weight 0.12s;
+    }
+    .dmy-wheel-item:hover { color: #6b7280; }
+    .dmy-wheel-item.dmy-wheel-selected { color: #1a1a1a; font-weight: 700; font-size: 1.15rem; }
+    .dmy-wheel-highlight {
+      position: absolute; left: 2px; right: 2px; top: 50%; transform: translateY(-50%);
+      height: 36px; background: rgba(54,153,255,0.08);
+      border-top: 1.5px solid rgba(54,153,255,0.35); border-bottom: 1.5px solid rgba(54,153,255,0.35);
+      border-radius: 8px; pointer-events: none; z-index: 1; box-sizing: border-box;
+    }
+    .dmy-wheel-sep { font-size: 1.2rem; font-weight: 700; color: #9ca3af; padding-bottom: 2px; }
+
+    /* position: sticky + bottom:0: khi popup (cha truc tiep - xem .dmy-picker-popup, la
+       scroll container do overflow-y:auto) khong du chieu cao va phai tu cuon noi bo (man
+       hinh rat thap, ca huong tren/duoi deu khong du cho - xem positionPopup() trong JS ben
+       duoi), hang nut Hom nay/Huy/Chon van LUON duoc ghim hien thi o day scrollport thay vi
+       bi day khuat xuong duoi va can nguoi dung tu cuon moi thay - dam bao "click duoc bang
+       chuot" that su (khong chi dung ve mat toa do) ke ca truong hop cuc xau nay.
+       bottom PHAI la 0 (KHONG am): sticky offset am se khien khung hang nut nam LECH XUONG
+       DUOI canh cuoi cua vung cuon (popup), tran ra NGOAI popup va "de" len cac phan tu KHAC
+       nam duoi no ngoai doi (vd doan <p> huong dan cua modal Auto deploy trong task_list.html)
+       - chinh no se "hung" mat click danh cho cac phan tu do (da phat hien qua Playwright:
+       click vao <p> ngoai modal bi .dmy-picker-actions o mot input KHAC chan mat, y muon click
+       khong den duoc dung phan tu). Vi popup da co san padding-bottom 1rem (thua ke tu
+       .dmy-picker-popup), giu bottom:0 la du de hang nut dinh sat ngay tren phan padding do,
+       khong can "bleed" ra het canh popup. */
+    .dmy-picker-actions {
+      display: flex; justify-content: space-between; align-items: center; gap: 0.4rem;
+      position: sticky; bottom: 0; padding-top: 0.5rem; margin-top: 0.5rem;
+      background: #fff; border-top: 1px solid transparent;
+    }
+    /* Vien tren + bong nhe CHI hien khi hang nut dang thuc su "dinh" (sticky kich hoat do
+       noi dung phia tren bi cuon khuat) - phan biet truc quan voi truong hop binh thuong
+       (popup du cao, khong can cuon, hang nut nam ngay duoi cung theo flow tu nhien). */
+    .dmy-picker-popup.dmy-scrolled .dmy-picker-actions {
+      border-top-color: #eef1f5; box-shadow: 0 -6px 10px -8px rgba(15,23,42,.15);
+    }
+    .dmy-picker-actions-right { display: flex; gap: 0.4rem; }
+    .dmy-picker-actions button { padding: 0.4rem 0.9rem; font-size: 0.85rem; border-radius: 8px; }
+    .dmy-picker-actions .dmy-today { background: transparent; color: #3699FF; padding: 0.4rem 0.6rem; }
+    .dmy-picker-actions .dmy-today:hover { background: #eff6ff; }
+
+    /* Mobile: lich qua dai buoc phai vuot len moi thay 2 o cuon Gio/Phut (da phat hien -
+       tong chieu cao popup tren man hinh thap thuong vuot qua khong gian con lai). Thu gon
+       cac khoang cach + so hang wheel hien thi (5 -> 3 hang) de vua man hinh hon. LUU Y: chi
+       doi height/padding cua .dmy-wheel-list/.dmy-wheel-col o day - KHONG doi ROW_H (van la
+       36px, hang so JS khong doi) - cong thuc "scrollTop = idx * ROW_H de nam giua" van
+       dung voi MOI so hang hien thi N, mien la padding = ((N-1)/2)*ROW_H (voi N=3:
+       (3-1)/2*36 = 36px, xem giai thich chi tiet trong initDmyPicker ben duoi). */
+    @media (max-width: 480px) {
+      .dmy-picker-popup { padding: 0.75rem; }
+      .dmy-picker-nav { margin-bottom: 0.4rem; }
+      .dmy-picker-days { margin-bottom: 0.4rem; }
+      .dmy-picker-days .day { padding: 0.3rem 0; }
+      .dmy-picker-time { margin: 0.4rem 0 0.5rem; }
+      .dmy-wheel-col { height: 108px; }
+      .dmy-wheel-list { height: 108px; padding: 36px 0; }
+    }
+
+    .task-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; }
+    .task-actions button, .task-actions .icon-btn { height: 2rem; box-sizing: border-box; }
+    .task-actions button { padding: 0.35rem 0.7rem; font-size: 0.85rem; }
+
+    .icon-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 2rem; height: 2rem; border-radius: 6px;
+      background: #eff6ff; color: #3699FF; border: 1px solid #dbeafe;
+      text-decoration: none; font-size: 1rem; line-height: 1; flex-shrink: 0;
+      transition: background 0.15s;
+    }
+    .icon-btn:hover { background: #dbeafe; }
+
+    /* Responsive table: bang that tren desktop (cot thang hang chuan), tu chuyen thanh
+       khoi xep doc co nhan tren man hinh nho thay vi flex tu do (de bi lech theo do dai noi dung). */
+    @media (max-width: 700px) {
+      table.responsive-table thead { display: none; }
+      table.responsive-table, table.responsive-table tbody, table.responsive-table tr, table.responsive-table td {
+        display: block; width: 100%;
+      }
+      table.responsive-table tr { margin-bottom: 0.6rem; border: 1px solid #e5e7eb; border-radius: 8px; padding: 0.4rem 0.75rem; }
+      /* Label va value tren CUNG 1 dong (thay vi label rieng 1 dong roi xuong dong
+         moi toi value) - giam gan mot nua chieu cao moi field so voi truoc. */
+      table.responsive-table td {
+        border: none; padding: 0.2rem 0;
+        display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem;
+      }
+      table.responsive-table td[data-label]::before {
+        content: attr(data-label) ":";
+        flex: 0 0 auto;
+        min-width: 90px;
+        font-size: 0.7rem;
+        color: #888;
+        text-transform: uppercase;
+        letter-spacing: 0.02em;
+      }
+      table.responsive-table td[data-label="Thao tác"] {
+        display: block; padding-top: 0.4rem;
+      }
+      table.responsive-table td[data-label="Thao tác"]::before {
+        display: block; margin-bottom: 0.3rem;
+      }
+    }
+
+    /* Phan trang (#pagination trong task_list.html) - bien the "nut vuong bo goc": trang
+       hien tai (.active) nen xanh #3699FF chu trang co bong nhe; trang khac nen trang vien
+       xam, hover doi vien/chu xanh + nen xam nhat; Prev/Next dung chung .page-btn, khi
+       disabled (dau/cuoi danh sach) chuyen thanh <span> mo dan + khong bat su kien click. */
+    .pagination { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; margin-top: 1rem; }
+    .page-btn {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 2.25rem; height: 2.25rem; padding: 0 0.6rem; box-sizing: border-box;
+      border-radius: 6px; border: 1px solid #e5e7eb; background: #fff; color: #1a1a1a;
+      font-weight: 600; font-size: 0.85rem; text-decoration: none; cursor: pointer;
+      transition: background 0.15s, border-color 0.15s, color 0.15s;
+    }
+    .page-btn:hover { border-color: #3699FF; color: #3699FF; background: #f3f4f6; }
+    .page-btn.active {
+      background: #3699FF; border-color: #3699FF; color: #fff;
+      box-shadow: 0 2px 6px rgba(54,153,255,.35);
+    }
+    .page-btn.active:hover { border-color: #3699FF; color: #fff; background: #3699FF; }
+    .page-btn.disabled { opacity: 0.4; pointer-events: none; }
+    .page-ellipsis {
+      display: inline-flex; align-items: center; justify-content: center;
+      min-width: 2.25rem; height: 2.25rem; color: #9ca3af; font-size: 0.85rem;
+    }
+    @media (max-width: 700px) {
+      .pagination { gap: 0.3rem; }
+      .page-btn, .page-ellipsis { min-width: 1.9rem; height: 1.9rem; padding: 0 0.35rem; font-size: 0.8rem; }
+    }
+
+    /* Nut cuon noi (/tasks, /staging, /production) - xep DOC goc duoi-phai man hinh, nam
+       o BOTTOM nen khong bao gio dam vao nut Sync tron o TOP-phai (xem button.icon-btn).
+       Tai su dung look nut tron 44px cua icon-btn (nen trang thay vi transparent de noi bat
+       tren nen trang cua trang, vien nhe phan biet voi background). An mac dinh (JS tu hien
+       khi trang du dai de cuon - xem script cuoi <body>). */
+    #scroll-fab { position: fixed; right: 1rem; bottom: 1rem; z-index: 40; display: none; flex-direction: column; gap: 0.5rem; }
+    #scroll-fab button {
+      width: 44px; height: 44px; border-radius: 50%; padding: 0;
+      display: inline-flex; align-items: center; justify-content: center;
+      background: #fff; border: 1px solid #e5e7eb; box-shadow: 0 2px 8px rgba(0,0,0,.12);
+    }
+    #scroll-fab button svg { width: 20px; height: 20px; stroke: #3699FF; }
+    #scroll-fab button:hover { background: #eaf3ff; }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-left">
+      <button type="button" class="icon-toggle" id="menu-toggle" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" width="24" height="24">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+      </button>
+      <a href="/home" class="logo"><img src="/static/gpay-logo.png" alt="Gpay"></a>
+      {% set current_path = request.url.path %}
+      <div class="nav-links" id="nav-links">
+        <a href="/home" class="{{ 'current' if current_path == '/home' else '' }}">Home</a>
+        <a href="/tasks" class="{{ 'current' if current_path == '/tasks' or (current_path.startswith('/tasks/') and current_path != '/tasks/create') else '' }}">Danh sách deploy</a>
+        <a href="/tasks/create" class="{{ 'current' if current_path == '/tasks/create' else '' }}">Tạo request</a>
+        {% if user and user.can_access_staging %}
+        <a href="/staging" class="{{ 'current' if current_path == '/staging' else '' }}">Staging</a>
+        {% endif %}
+        {% if user and user.can_access_production %}
+        <a href="/production" class="{{ 'current' if current_path == '/production' else '' }}">Production</a>
+        {% endif %}
+        {% if user and user.can_manage_settings %}
+        <div class="nav-dropdown">
+          <button type="button" class="nav-dropdown-toggle" id="settings-toggle" aria-expanded="false">
+            Setting
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14">
+              <path d="M6 9l6 6 6-6"/>
+            </svg>
+          </button>
+          <div class="nav-dropdown-panel" id="settings-panel">
+            <a href="/settings/general">General</a>
+            <a href="/catalog">Group/Project</a>
+            <a href="/users">Users</a>
+          </div>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+    {% if user %}
+    <div class="user-info">
+      <button type="button" class="user-chip" id="user-toggle" aria-label="Tài khoản" aria-expanded="false">
+        <span class="avatar">{{ user.email[:2] }}</span>
+        <span class="name">{{ user.email }}</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="12" height="12">
+          <path d="M6 9l6 6 6-6"/>
+        </svg>
+      </button>
+      <div class="user-panel" id="user-panel">
+        <div class="email">{{ user.email }}</div>
+        <div class="role">{{ user.role.value }}</div>
+        <a href="/auth/logout">Đăng xuất</a>
+      </div>
+    </div>
+    {% endif %}
+  </header>
+  <script>
+    (function () {
+      function setupToggle(toggleId, panelId) {
+        const toggle = document.getElementById(toggleId);
+        const panel = document.getElementById(panelId);
+        if (!toggle || !panel) return;
+        toggle.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const open = panel.classList.toggle('open');
+          toggle.setAttribute('aria-expanded', open);
+        });
+        document.addEventListener('click', (e) => {
+          if (!panel.contains(e.target) && e.target !== toggle) {
+            panel.classList.remove('open');
+            toggle.setAttribute('aria-expanded', 'false');
+          }
+        });
+      }
+      setupToggle('menu-toggle', 'nav-links');
+      setupToggle('user-toggle', 'user-panel');
+      setupToggle('settings-toggle', 'settings-panel');
+    })();
+  </script>
+  <script>
+    // Dinh nghia SOM (truoc noi dung cua cac trang con ke thua template nay) vi cac
+    // template con (task_form.html, task_list.html) goi initDmyPicker(...) ngay khi script
+    // cua rieng chung chay - dong bo, luc parse trang - khong phai trong 1 event handler.
+    // Neu dat script nay sau phan noi dung do (nhu cac ham dung chung khac, vd doAjaxSubmit),
+    // loi "initDmyPicker is not a function" se xay ra vi script cua template con chay truoc,
+    // co the lam gay ca cac dong code phia sau no trong cung script block (vd mat luon submit
+    // handler cua form).
+    window.parseDmyDatetime = function (text) {
+      // "dd/mm/yyyy hh:mm" -> ISO "yyyy-MM-ddThh:mm" (dung de gan vao input truoc khi
+      // submit, backend parse bang datetime.fromisoformat khong doi gi). Tra ve null neu
+      // sai dinh dang HOAC ngay/gio khong co that (vd 31/02, 25:70) - validate that su
+      // bang Date, khong chi dua vao regex.
+      if (typeof text !== 'string') return null;
+      const m = text.trim().match(/^(\d{2})\/(\d{2})\/(\d{4})\s+(\d{2}):(\d{2})$/);
+      if (!m) return null;
+      const day = parseInt(m[1], 10);
+      const month = parseInt(m[2], 10);
+      const year = parseInt(m[3], 10);
+      const hour = parseInt(m[4], 10);
+      const minute = parseInt(m[5], 10);
+      if (month < 1 || month > 12) return null;
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+      const daysInMonth = new Date(year, month, 0).getDate();
+      if (day < 1 || day > daysInMonth) return null;
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${year}-${pad(month)}-${pad(day)}T${pad(hour)}:${pad(minute)}`;
+    };
+
+    window.formatDmyDatetime = function (iso) {
+      // Chieu nguoc lai: ISO "yyyy-MM-ddThh:mm[:ss]" -> "dd/mm/yyyy hh:mm", dung khi can
+      // hien lai gia tri cu (ISO) tren o nhap dang text cho nguoi dung doc duoc.
+      if (typeof iso !== 'string') return '';
+      const m = iso.trim().match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      if (!m) return '';
+      return `${m[3]}/${m[2]}/${m[1]} ${m[4]}:${m[5]}`;
+    };
+
+    // Popup lich (chon ngay bang click, gio/phut bang o so) cho cac o nhap dang text
+    // "dd/mm/yyyy hh:mm" (confirmed_run_at trong task_form.html, auto-deploy-time trong
+    // task_list.html) - bo sung cach chon bang lich ben canh go tay san co (parseDmyDatetime
+    // o tren van la nguon validate/convert duy nhat, popup nay chi la 1 cach dien input).
+    window.initDmyPicker = function (inputEl) {
+      if (!inputEl || inputEl.dataset.dmyPickerInit) return;
+      inputEl.dataset.dmyPickerInit = '1';
+
+      const wrap = document.createElement('div');
+      wrap.className = 'dmy-input-wrap';
+      inputEl.parentNode.insertBefore(wrap, inputEl);
+      wrap.appendChild(inputEl);
+
+      // Input goc co the mang theo margin rieng (vd style="margin-bottom:1rem" de tao khoang
+      // cach voi phan tu ke tiep, xem #auto-deploy-time trong task_list.html). Input van la
+      // inline-block (mac dinh cua the <input>) nen margin cua no KHONG bi WRAP (div, block)
+      // collapse vao - wrap se cao hon input thuc te dung bang phan margin do, khien nut
+      // .dmy-picker-toggle (dinh vi top:50% theo chieu cao cua WRAP, khong phai cua input)
+      // bi lech tam xuong duoi/tran ra ngoai canh duoi cua input. Day la nguyen nhan that su
+      // cua loi icon lech (da do dac bang getBoundingClientRect() de xac nhan), khong phai do
+      // CSS cua rieng nut toggle. Fix tan goc: chuyen margin do sang cho WRAP va xoa tren
+      // input, de chieu cao WRAP luon khop dung chieu cao INPUT.
+      const inputMargin = getComputedStyle(inputEl).margin;
+      if (inputMargin && inputMargin !== '0px') {
+        wrap.style.margin = inputMargin;
+        inputEl.style.margin = '0';
+      }
+
+      // Tuong tu margin o tren: neu input goc duoc gan san max-width rieng (inline style,
+      // vd #confirmed_run_at trong task_form.html can gioi han khong cho keo dai het chieu
+      // ngang the card tren desktop), phai chuyen max-width do sang WRAP (khong phai input),
+      // vi nut .dmy-picker-toggle neo theo canh phai cua WRAP - neu chi gioi han input ma de
+      // wrap (div, block) tu dong choan het chieu rong the cha, icon van bi day ra xa/tran
+      // mep. Wrap la block nen van tu co lai binh thuong tren man hinh hep (mobile) du co
+      // max-width, khong can them rule rieng cho responsive.
+      const inputMaxWidth = inputEl.style.maxWidth;
+      if (inputMaxWidth) {
+        wrap.style.maxWidth = inputMaxWidth;
+        inputEl.style.maxWidth = '';
+      }
+
+      const toggleBtn = document.createElement('button');
+      toggleBtn.type = 'button';
+      toggleBtn.className = 'dmy-picker-toggle';
+      toggleBtn.setAttribute('aria-label', 'Chọn ngày giờ');
+      toggleBtn.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round" width="18" height="18">' +
+        '<rect x="3" y="5" width="18" height="16" rx="3"/>' +
+        '<path d="M8 3v4M16 3v4M3 10h18"/>' +
+        '<path d="M8 14h.01M12 14h.01M16 14h.01M8 17.5h.01M12 17.5h.01"/>' +
+        '</svg>';
+      wrap.appendChild(toggleBtn);
+
+      // Markup tinh (khong noi du lieu dong vao chuoi) nen dung innerHTML o day la an toan;
+      // cac phan co du lieu dong (o ngay trong luoi lich, cac dong so trong cot cuon gio/phut
+      // ben duoi) deu duoc dung createElement/textContent, khong dung innerHTML.
+      const popup = document.createElement('div');
+      popup.className = 'dmy-picker-popup';
+      popup.innerHTML =
+        '<div class="dmy-picker-nav">' +
+          '<button type="button" class="dmy-prev" aria-label="Tháng trước">‹</button>' +
+          '<span class="dmy-picker-label"></span>' +
+          '<button type="button" class="dmy-next" aria-label="Tháng sau">›</button>' +
+        '</div>' +
+        '<div class="dmy-picker-days"></div>' +
+        '<div class="dmy-picker-time">' +
+          '<div class="dmy-wheel-col">' +
+            '<div class="dmy-wheel-highlight"></div>' +
+            '<div class="dmy-wheel-list dmy-hour-list" role="listbox" aria-label="Giờ" tabindex="0"></div>' +
+          '</div>' +
+          '<span class="dmy-wheel-sep">:</span>' +
+          '<div class="dmy-wheel-col">' +
+            '<div class="dmy-wheel-highlight"></div>' +
+            '<div class="dmy-wheel-list dmy-minute-list" role="listbox" aria-label="Phút" tabindex="0"></div>' +
+          '</div>' +
+        '</div>' +
+        '<div class="dmy-picker-actions">' +
+          '<button type="button" class="dmy-today">Hôm nay</button>' +
+          '<div class="dmy-picker-actions-right">' +
+            '<button type="button" class="secondary dmy-cancel">Huỷ</button>' +
+            '<button type="button" class="dmy-ok">Chọn</button>' +
+          '</div>' +
+        '</div>';
+      wrap.appendChild(popup);
+
+      // Chi de bat/tat vien tren + bong nhe cua hang nut dinh (sticky) o CSS
+      // (.dmy-picker-popup.dmy-scrolled .dmy-picker-actions) khi noi dung ben trong popup
+      // dang thuc su bi cuon khuat - khong anh huong logic chuc nang, chi UI.
+      popup.addEventListener('scroll', () => {
+        popup.classList.toggle('dmy-scrolled', popup.scrollTop > 1);
+      });
+
+      const DOW_LABELS = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+      const label = popup.querySelector('.dmy-picker-label');
+      const daysBox = popup.querySelector('.dmy-picker-days');
+      const hourList = popup.querySelector('.dmy-hour-list');
+      const minuteList = popup.querySelector('.dmy-minute-list');
+
+      // PHAI khop voi CSS: .dmy-wheel-item { height: 36px } va .dmy-wheel-list { padding:
+      // 72px 0 } (= 2 * ROW_H). Voi padding tren/duoi = 2*ROW_H, item o vi tri idx (0-based)
+      // luon can scrollTop = idx * ROW_H de nam giua khung nhin (suy ra bang dai so, khong
+      // phu thuoc clientHeight) - nen tinh duoc ca khi popup dang display:none (chua co layout
+      // that), khong can do DOM.
+      const ROW_H = 36;
+
+      // Cuon vo han (yeu cau: tu 23h cuon tiep 1 nac la ve thang 00h, khong phai cuon nguoc
+      // lai tu dau): ky thuat "carousel gia" pho bien cho iOS-style wheel - dung LAP LAI
+      // day gia tri (0..max) THANH_3_BAN_SAO lien tiep nhau trong DOM thay vi 1 ban duy
+      // nhat. Nguoi dung luon thao tac o BAN SAO GIUA (index tuyet doi = cycle + value);
+      // sau moi lan cuon dung lai (debounce 90ms, giong logic cu), neu vi tri hien tai roi
+      // vao ban sao DAU hoac CUOI thi am tham (KHONG smooth, khong the nhan ra vi 3 ban
+      // giong het nhau) dat lai scrollTop ve dung gia tri tuong duong o ban sao GIUA - qua
+      // do luon con du "dat" de tiep tuc cuon theo huong cu ma khong bao gio cham bien that
+      // cua danh sach trong dieu kien su dung binh thuong. Bien that (dau ban sao 1 / cuoi
+      // ban sao 3) van con nhu 1 luoi an toan cuoi cung cho cac thao tac cuc doan (vd set
+      // scrollTop = scrollHeight bang tay), luc do van ap dung logic chan scroll-chain nhu
+      // truoc (xem listener 'wheel' ben duoi).
+      const WHEEL_REPEATS = 3;
+
+      function buildWheelItems(listEl, max) {
+        const cycle = max + 1;
+        const items = [];
+        for (let rep = 0; rep < WHEEL_REPEATS; rep++) {
+          for (let v = 0; v <= max; v++) {
+            const item = document.createElement('div');
+            item.className = 'dmy-wheel-item';
+            item.setAttribute('role', 'option');
+            item.textContent = String(v).padStart(2, '0');
+            item.dataset.value = String(v);
+            listEl.appendChild(item);
+            items.push(item);
+          }
+        }
+        return { items, cycle };
+      }
+      const hourWheel = buildWheelItems(hourList, 23);
+      const minuteWheel = buildWheelItems(minuteList, 59);
+      const hourItems = hourWheel.items;
+      const minuteItems = minuteWheel.items;
+
+      let selHour = 0, selMinute = 0;
+
+      function markWheelSelection(items, idx) {
+        items.forEach((el, i) => el.classList.toggle('dmy-wheel-selected', i === idx));
+      }
+      // Vi tri tuyet doi cua gia tri `value` trong BAN SAO GIUA (repeat thu 1, 0-based).
+      function middleAbsIndex(cycle, value) {
+        return cycle + value;
+      }
+      // seed = dat vi tri ngay khi mo popup, phai tuc thi (khong smooth); click = nguoi dung
+      // tu chon 1 dong, cuon mem cho de nhin (yeu cau "scrollIntoView mượt").
+      function scrollWheelTo(listEl, idx, smooth) {
+        if (smooth) listEl.scrollTo({ top: idx * ROW_H, behavior: 'smooth' });
+        else listEl.scrollTop = idx * ROW_H;
+      }
+
+      function attachWheelEvents(listEl, wheel, onChange) {
+        const { items, cycle } = wheel;
+        let debounceTimer = null;
+        // Chan "scroll chaining" BANG TAY (bo sung cho CSS overscroll-behavior: contain o
+        // .dmy-wheel-list): da do dac thuc te qua Playwright (mouse.wheel voi delta lon, vd
+        // nguoi dung luot chuot nhanh) va phat hien overscroll-behavior: contain KHONG du tin
+        // cay de chan chaining trong moi truong (headless Chromium) khi cuon toi/vuot qua het
+        // bien tren/duoi cua cot - popup cha (.dmy-picker-popup, cung la scroll container do
+        // overflow-y:auto) van bi "an theo" cuon them (da do duoc popup.scrollTop nhay tu 0
+        // len 96 chi sau 1 lan wheel, du hourlist da o dung bien duoi cung 828/828). Tu
+        // preventDefault() ngay tren wheel event khi DA O BIEN va huong cuon tiep tuc VUOT QUA
+        // bien do (xuong khi da o cuoi / len khi da o dau) dam bao KHONG con delta nao "tran"
+        // ra ngoai de trinh duyet co the chain len phan tu cha, bat ke CSS co hoat dong dung
+        // hay khong trong tung engine/phien ban cu the. Voi 3 ban sao, day chi con la luoi an
+        // toan cuoi cung (binh thuong se recycle truoc khi cham toi day - xem duoi).
+        listEl.addEventListener('wheel', (e) => {
+          const atTop = listEl.scrollTop <= 0;
+          const atBottom = listEl.scrollTop + listEl.clientHeight >= listEl.scrollHeight - 1;
+          if ((atTop && e.deltaY < 0) || (atBottom && e.deltaY > 0)) {
+            e.preventDefault();
+          }
+        }, { passive: false });
+        // Cuon toi dau -> gia tri "dang chon" cap nhat theo (debounce de khong tinh lien tuc
+        // giua chung, chi chot lai sau khi nguoi dung ngung cuon ~90ms). Viec snap muot vao
+        // dung vi tri do CSS scroll-snap-type dam nhiem, JS khong can ep lai scrollTop.
+        listEl.addEventListener('scroll', () => {
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => {
+            let idx = Math.round(listEl.scrollTop / ROW_H);
+            idx = Math.min(items.length - 1, Math.max(0, idx));
+            const value = idx % cycle;
+            markWheelSelection(items, idx);
+            onChange(value);
+
+            // Recycle: dang o ban sao DAU (idx < cycle) hoac ban sao CUOI (idx >= 2*cycle)
+            // -> am tham nhay ve dung gia tri tuong duong o ban sao GIUA, KHONG smooth (chi
+            // 1 khung hinh, nguoi dung khong thay duoc vi noi dung 3 ban giong het nhau).
+            if (idx < cycle || idx >= 2 * cycle) {
+              const target = middleAbsIndex(cycle, value);
+              listEl.scrollTop = target * ROW_H;
+              markWheelSelection(items, target);
+            }
+          }, 90);
+        });
+        items.forEach((el, idx) => {
+          el.addEventListener('click', () => {
+            scrollWheelTo(listEl, idx, true);
+            markWheelSelection(items, idx);
+            onChange(idx % cycle);
+          });
+        });
+      }
+      attachWheelEvents(hourList, hourWheel, (v) => { selHour = v; });
+      attachWheelEvents(minuteList, minuteWheel, (v) => { selMinute = v; });
+
+      let viewYear, viewMonth, selDay, selMonth, selYear;
+
+      function seedFromInput() {
+        const now = new Date();
+        const iso = window.parseDmyDatetime(inputEl.value);
+        let base = now;
+        if (iso) {
+          const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+          base = new Date(parseInt(m[1], 10), parseInt(m[2], 10) - 1, parseInt(m[3], 10));
+          selHour = parseInt(m[4], 10);
+          selMinute = parseInt(m[5], 10);
+        } else {
+          selHour = now.getHours();
+          selMinute = now.getMinutes();
+        }
+        viewYear = base.getFullYear();
+        viewMonth = base.getMonth();
+        selYear = base.getFullYear();
+        selMonth = base.getMonth();
+        selDay = base.getDate();
+      }
+
+      // Dat vi tri cuon gio/phut theo selHour/selMinute - PHAI goi sau khi popup da hien
+      // (display:block that su), xem comment o openPopup() ben duoi.
+      function seedWheelScroll() {
+        // Luon seed vao BAN SAO GIUA (xem middleAbsIndex) de co du "dat" cuon ca 2 huong
+        // truoc khi can recycle - khong seed vao ban sao dau/cuoi.
+        const hourIdx = middleAbsIndex(hourWheel.cycle, selHour);
+        const minuteIdx = middleAbsIndex(minuteWheel.cycle, selMinute);
+        markWheelSelection(hourItems, hourIdx);
+        markWheelSelection(minuteItems, minuteIdx);
+        scrollWheelTo(hourList, hourIdx, false);
+        scrollWheelTo(minuteList, minuteIdx, false);
+      }
+
+      function renderCalendar() {
+        label.textContent = `Tháng ${viewMonth + 1}/${viewYear}`;
+        daysBox.replaceChildren();
+        DOW_LABELS.forEach((d) => {
+          const el = document.createElement('div');
+          el.className = 'dow';
+          el.textContent = d;
+          daysBox.appendChild(el);
+        });
+        const now = new Date();
+        const todayY = now.getFullYear(), todayM = now.getMonth(), todayD = now.getDate();
+        const firstOfMonth = new Date(viewYear, viewMonth, 1);
+        // JS getDay(): 0=CN..6=T7 -> quy ve dau tuan la T2 (0=T2..6=CN) cho khop DOW_LABELS.
+        const startOffset = (firstOfMonth.getDay() + 6) % 7;
+        const daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+        const prevMonthDays = new Date(viewYear, viewMonth, 0).getDate();
+
+        for (let i = 0; i < startOffset; i++) {
+          const el = document.createElement('div');
+          el.className = 'day muted';
+          el.textContent = String(prevMonthDays - startOffset + i + 1);
+          daysBox.appendChild(el);
+        }
+        for (let d = 1; d <= daysInMonth; d++) {
+          const el = document.createElement('div');
+          el.className = 'day';
+          if (d === todayD && viewMonth === todayM && viewYear === todayY) el.classList.add('today');
+          if (d === selDay && viewMonth === selMonth && viewYear === selYear) el.classList.add('selected');
+          el.textContent = String(d);
+          el.addEventListener('click', () => {
+            selDay = d; selMonth = viewMonth; selYear = viewYear;
+            renderCalendar();
+          });
+          daysBox.appendChild(el);
+        }
+        const trailing = (7 - ((startOffset + daysInMonth) % 7)) % 7;
+        for (let i = 1; i <= trailing; i++) {
+          const el = document.createElement('div');
+          el.className = 'day muted';
+          el.textContent = String(i);
+          daysBox.appendChild(el);
+        }
+        // Retrigger animation nhe (mo popup / chuyen thang): bo class roi ep reflow
+        // (offsetWidth) truoc khi them lai, neu khong trinh duyet se khong chay lai keyframe
+        // vi class ten khong doi giua 2 lan.
+        daysBox.classList.remove('dmy-anim');
+        void daysBox.offsetWidth;
+        daysBox.classList.add('dmy-anim');
+
+        // BUG THAT SU da do dac duoc (Playwright, xem repro trong task cua [sec]/[dev]):
+        // luoi ngay co the co 5 HOAC 6 hang tuy thang (vd thang 8/2026 can 6 hang, cao hon
+        // ~38px so voi thang 5 hang) - positionPopup() truoc day CHI duoc goi 1 lan luc mo
+        // popup (openPopup()), khong goi lai khi noi dung sau do doi chieu cao do nguoi dung
+        // bam Trang truoc/Trang sau/Hom nay (renderCalendar() ve lai luoi voi so hang khac).
+        // Neu lan mo dau tien popup VUA DU cho (khong bi ep max-height, vd man hinh lon
+        // 1920x1080 voi thang 5 hang), roi nguoi dung chuyen sang thang 6 hang, khung popup
+        // (dang khong co max-height gioi han) se cao THEM ~38px va TRAN qua day/dinh
+        // viewport ma khong co gi ngan lai - da do duoc thuc te: popup.bottom=1104px >
+        // innerHeight=1080px, khong the bam nut "Chon". Goi lai positionPopup() (chi khi
+        // popup dang mo - luc render lan dau trong openPopup() popup CHUA co class 'open',
+        // se tu bo qua o day vi openPopup() da tu goi positionPopup() rieng ngay sau do) de
+        // tinh lai vi tri/max-height moi khi noi dung co the doi chieu cao, dam bao bat bien
+        // "popup luon nam tron trong viewport" duoc giu o MOI thoi diem, khong chi luc mo.
+        if (popup.classList.contains('open')) positionPopup();
+      }
+
+      popup.querySelector('.dmy-prev').addEventListener('click', () => {
+        viewMonth -= 1;
+        if (viewMonth < 0) { viewMonth = 11; viewYear -= 1; }
+        renderCalendar();
+      });
+      popup.querySelector('.dmy-next').addEventListener('click', () => {
+        viewMonth += 1;
+        if (viewMonth > 11) { viewMonth = 0; viewYear += 1; }
+        renderCalendar();
+      });
+      // "Hom nay": chi dua luoi lich ve va chon ngay hom nay, giu nguyen gio/phut nguoi dung
+      // dang chon tren cot cuon (dung UX pho bien cua nut "Today" trong cac date picker).
+      popup.querySelector('.dmy-today').addEventListener('click', () => {
+        const now = new Date();
+        viewYear = now.getFullYear();
+        viewMonth = now.getMonth();
+        selYear = viewYear; selMonth = viewMonth; selDay = now.getDate();
+        renderCalendar();
+      });
+      popup.querySelector('.dmy-cancel').addEventListener('click', () => closePopup());
+      popup.querySelector('.dmy-ok').addEventListener('click', () => {
+        const pad = (n) => String(n).padStart(2, '0');
+        inputEl.value = `${pad(selDay)}/${pad(selMonth + 1)}/${selYear} ${pad(selHour)}:${pad(selMinute)}`;
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        closePopup();
+      });
+
+      // Khoang cach toi thieu giu voi input (GAP) va toi mep viewport (VIEWPORT_MARGIN) khi
+      // dat vi tri popup - xem positionPopup() ben duoi. MIN_USABLE_HEIGHT la san toi thieu
+      // du de nguoi dung con thao tac duoc (cuon noi bo ben trong popup neu can) tren cac man
+      // hinh cuc thap, tranh popup bi ep xuong 0px.
+      const POPUP_GAP = 8;
+      const VIEWPORT_MARGIN = 8;
+      const MIN_USABLE_HEIGHT = 160;
+
+      // Tinh va gan vi tri THAT (top/left, don vi px, toa do viewport - vi .dmy-picker-popup
+      // la position:fixed) cho popup, LUON kep (clamp) trong man hinh:
+      //   - Uu tien mo XUONG DUOI input (giu hanh vi/animation cu) neu DU CHO HIEN FULL
+      //     (khong can cuon noi bo).
+      //   - Neu KHONG du o duoi de hien full NHUNG tren du -> lat len TREN input (class
+      //     dmy-flip-up, chi doi chieu animation truot).
+      //   - Neu CA 2 huong deu khong du de hien full (man hinh rat thap) -> VAN UU TIEN GIU
+      //     mo xuong duoi (khong lat len) neu con >= MIN_USABLE_HEIGHT, gioi han max-height
+      //     theo khong gian thuc te va cho cuon noi bo (overflow-y: auto o CSS).
+      //     Co tinh KHONG chon "huong nao rong hon" o truong hop nay (du tren co the rong hon
+      //     duoi mot chut): lat len TREN se de popup CHE KHUAT noi dung nam TREN input trong
+      //     cung khoi cha (vd doan <p> huong dan phia tren o nhap trong modal Auto deploy) -
+      //     da phat hien hoi quy that qua Playwright (click vao <p> do bi .dmy-picker-actions
+      //     cua popup da lat len chan mat) khi thu uu tien "huong rong hon" don thuan.
+      //   - QUAN TRONG (bug da bi bao cao lai o vong sua thu 3 - xem [sec]): CAC nhanh max-height
+      //     o duoi day KHONG duoc dung MIN_USABLE_HEIGHT lam "san" (floor) de EP max-height LON
+      //     HON khong gian thuc te con lai (maxAllowed/spaceAbove) - lam vay se khien popup VAN
+      //     TRAN ra ngoai viewport (dung place ma bug nay dinh fix ngay tu dau). MIN_USABLE_HEIGHT
+      //     chi con dung de QUYET DINH huong (>= nguong nay moi coi la "con dung duoc"), rieng
+      //     truong hop khong gian thuc te NHO HON ca MIN_USABLE_HEIGHT se roi xuong nhanh du
+      //     phong (fallback) rieng: bo neo theo input, dat popup sat mep TREN CUNG cua VIEWPORT
+      //     va cho no tu cuon noi bo trong toan bo chieu cao kha dung (xem 2 nhanh if ben duoi).
+      // Goi lai khi cuon/resize trong luc popup dang mo (xem openPopup()/closePopup() ben
+      // duoi), VA moi lan renderCalendar() ve lai luoi ngay (5 hoac 6 hang tuy thang - xem
+      // ghi chu trong renderCalendar()) de popup luon bam sat dung vi tri input va khong bi
+      // TRAN khi noi dung doi chieu cao SAU luc mo (khong chi luc mo).
+      function positionPopup() {
+        const wrapRect = wrap.getBoundingClientRect();
+        const viewportW = window.innerWidth;
+        const viewportH = window.innerHeight;
+
+        // Luu scrollTop TRUOC khi tam thoi bo max-height (xem ghi chu ngay duoi) de KHOI PHUC
+        // lai sau khi tinh xong - neu khong, buoc "bo max-height de do chieu cao that" o duoi
+        // se lam popup HET tran tam thoi (hien full noi dung -> khong con gi de cuon), khien
+        // trinh duyet TU RESET scrollTop ve 0 ngay tai thoi diem do, va gia tri cu bi mat vinh
+        // vien vi trinh duyet KHONG tu khoi phuc lai khi max-height duoc ap lai ngay sau -
+        // da phat hien qua Playwright (bug rieng, doc lap voi bug tran viewport dang fix o
+        // vong nay): cuon that (mouse wheel) BEN TRONG popup dang can cuon noi bo (vd man hinh
+        // rat thap) kich hoat 'scroll' tren window (capture:true, xem schedulePositionPopup())
+        // -> goi lai positionPopup() -> vo tinh xoa mat vi tri cuon nguoi dung vua thao tac.
+        const savedScrollTop = popup.scrollTop;
+
+        // Bo max-height dang gan (neu co tu lan mo/dat vi tri truoc) de do duoc chieu cao noi
+        // dung THAT SU (scrollHeight khong bi anh huong boi max-height/overflow dang ap dung,
+        // nhung van can bo truoc de tranh vong lap "max-height cu lam scrollHeight sai" ve mat
+        // logic doc code, du thuc te scrollHeight luon tra ve full content height).
+        popup.style.maxHeight = 'none';
+        const naturalHeight = popup.scrollHeight;
+
+        const spaceBelow = viewportH - wrapRect.bottom - POPUP_GAP - VIEWPORT_MARGIN;
+        const spaceAbove = wrapRect.top - POPUP_GAP - VIEWPORT_MARGIN;
+        const fitsBelow = naturalHeight <= spaceBelow;
+        const fitsAbove = naturalHeight <= spaceAbove;
+        // "Phao cuu sinh" cuoi cung khi CA 2 huong (kem san MIN_USABLE_HEIGHT) deu khong du -
+        // toan bo chieu cao co the dung duoc NEU bo qua neo theo input, dat sat 2 mep
+        // tren/duoi cua viewport (dam bao BAT BIEN top >= VIEWPORT_MARGIN va
+        // top + height <= viewportH - VIEWPORT_MARGIN LUON dung, bat ke input o dau).
+        const totalUsable = Math.max(0, viewportH - 2 * VIEWPORT_MARGIN);
+
+        let top;
+        let openUpward;
+        if (fitsBelow || (!fitsAbove && spaceBelow >= MIN_USABLE_HEIGHT)) {
+          openUpward = false;
+          top = wrapRect.bottom + POPUP_GAP;
+          // maxAllowed luon == spaceBelow (cung cong thuc) => da >= MIN_USABLE_HEIGHT hoac
+          // fitsBelow (khong can clamp) do dieu kien nhanh if o tren dam bao - KHONG can va
+          // KHONG duoc lay Math.max voi MIN_USABLE_HEIGHT nua (xem ghi chu lon o tren).
+          const maxAllowed = Math.max(0, viewportH - VIEWPORT_MARGIN - top);
+          if (naturalHeight > maxAllowed) {
+            popup.style.maxHeight = maxAllowed + 'px';
+          }
+        } else {
+          openUpward = true;
+          const availableAbove = Math.max(0, spaceAbove);
+          if (availableAbove < MIN_USABLE_HEIGHT) {
+            // Man hinh cuc thap / input qua sat mep tren: khong con cach nao giu popup ke
+            // sat input ma van >= MIN_USABLE_HEIGHT ma KHONG tran viewport - bo neo theo
+            // input, dat sat mep TREN CUNG va gioi han dung bang toan bo khong gian kha dung.
+            top = VIEWPORT_MARGIN;
+            popup.style.maxHeight = totalUsable + 'px';
+          } else {
+            const usedHeight = Math.min(naturalHeight, availableAbove);
+            top = Math.max(VIEWPORT_MARGIN, wrapRect.top - POPUP_GAP - usedHeight);
+            if (naturalHeight > availableAbove) {
+              popup.style.maxHeight = availableAbove + 'px';
+            }
+          }
+        }
+        popup.classList.toggle('dmy-flip-up', openUpward);
+
+        const popupW = popup.offsetWidth || 288;
+        let left = wrapRect.left;
+        const maxLeft = viewportW - VIEWPORT_MARGIN - popupW;
+        left = Math.min(left, Math.max(VIEWPORT_MARGIN, maxLeft));
+        left = Math.max(VIEWPORT_MARGIN, left);
+
+        popup.style.top = `${top}px`;
+        popup.style.left = `${left}px`;
+
+        // Khoi phuc lai vi tri cuon noi bo da luu o dau ham (xem ghi chu tren) - trinh duyet
+        // tu dong clamp gia tri ve khoang [0, scrollHeight - clientHeight] hop le theo
+        // max-height VUA duoc gan lai o tren, khong can tu tinh gioi han o day.
+        popup.scrollTop = savedScrollTop;
+      }
+
+      // Reposition khi cuon/resize luc popup dang mo (vd trang task_form.html du dai de cuon) -
+      // dung 1 rAF-throttle don gian de tranh tinh lai qua nhieu lan lien tuc trong 1 lan cuon.
+      let repositionRaf = null;
+      function schedulePositionPopup() {
+        if (repositionRaf !== null) return;
+        repositionRaf = requestAnimationFrame(() => {
+          repositionRaf = null;
+          if (popup.classList.contains('open')) positionPopup();
+        });
+      }
+
+      function openPopup() {
+        seedFromInput();
+        renderCalendar();
+        popup.classList.add('open');
+        popup.classList.remove('dmy-show');
+        // Dat vi tri NGAY (dong bo) truoc khi doi rAF: doc scrollHeight/getBoundingClientRect
+        // o positionPopup() da tu buoc trinh duyet tinh layout that su (popup vua chuyen sang
+        // display:block o tren), nen khong can doi them 1 frame rieng cho buoc nay.
+        positionPopup();
+        // Luon bat dau tu dinh popup moi lan mo (khong giu lai vi tri cuon cua lan mo truoc,
+        // vd neu lan truoc phai cuon noi bo do khong du cho - xem MIN_USABLE_HEIGHT o tren).
+        popup.scrollTop = 0;
+        popup.classList.remove('dmy-scrolled');
+        // window nghe capture=true de bat duoc scroll xay ra ben trong bat ky container con
+        // nao (vd 1 khu vuc cuon rieng trong trang), khong chi scroll cua window/document.
+        window.addEventListener('scroll', schedulePositionPopup, true);
+        window.addEventListener('resize', schedulePositionPopup);
+        // Popup luc con display:none KHONG co kich thuoc/scrollport that su, gan scrollTop
+        // luc do co the bi trinh duyet bo qua. 1 requestAnimationFrame (rAF) tung du cho 84
+        // phan tu wheel truoc day, nhung sau khi tang len carousel 3 ban sao (252 phan tu:
+        // 72 gio + 180 phut, phuc vu yeu cau cuon vo han) da do dac thuc te (khong phai ly
+        // thuyet - xem repro qua Playwright): 1 rAF KHONG con du de trinh duyet layout xong
+        // truoc khi gan scrollTop, khien no bi am tham bo qua/ve lai 0 (loi 100% tai hien,
+        // khong phai flaky). Long 2 lop rAF: frame dau chi dam bao ANIMATION FRAME DAU TIEN
+        // sau khi DOM 252 phan tu vua duoc chen (buildWheelItems) + display:block vua bat -
+        // trinh duyet co co hoi hoan tat 1 chu ky layout/paint day du; frame thu 2 (long ben
+        // trong) moi thuc su goi seedWheelScroll(), dam bao scrollTop duoc gan SAU KHI layout
+        // da on dinh hoan toan. Ky thuat "double rAF" nay la cach pho bien de cho browser
+        // "bat kip" sau 1 thay doi DOM/display lon, khong phai gia dinh tuy tien.
+        requestAnimationFrame(() => {
+          requestAnimationFrame(() => {
+            seedWheelScroll();
+            popup.classList.add('dmy-show');
+          });
+        });
+      }
+      function closePopup() {
+        popup.classList.remove('open');
+        popup.classList.remove('dmy-show');
+        window.removeEventListener('scroll', schedulePositionPopup, true);
+        window.removeEventListener('resize', schedulePositionPopup);
+        if (repositionRaf !== null) { cancelAnimationFrame(repositionRaf); repositionRaf = null; }
+      }
+
+      toggleBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (popup.classList.contains('open')) closePopup(); else openPopup();
+      });
+      document.addEventListener('click', (e) => {
+        // Dung composedPath() thay vi e.target: click chon ngay khien renderCalendar()
+        // xoa/tao lai toan bo o ngay (daysBox.replaceChildren()) NGAY TRONG luc event dang
+        // con bubble len document - luc listener nay chay, e.target da bi go khoi DOM nen
+        // wrap.contains(e.target) luon tra ve false (node roi rac khong nam trong cay DOM
+        // nao ca), khien popup tu dong (nham) ngay sau khi vua chon ngay. composedPath()
+        // ghi lai duong di cua event tai thoi diem dispatch, khong bi anh huong boi thay doi
+        // DOM xay ra sau do trong cung lan bubble.
+        if (!e.composedPath().includes(wrap)) closePopup();
+      });
+    };
+
+    // Dinh nghia SOM (giong initDmyPicker o tren, cung ly do): groups.html/staging.html/
+    // production.html goi window.subscribeSyncEvents(...) ngay khi script cua rieng chung
+    // chay (dong bo, luc parse trang, nam trong noi dung trang con - RENDER TRUOC script
+    // ben duoi dinh nghia doAjaxSubmit) - neu de ham nay o script SAU noi dung nhu
+    // doAjaxSubmit, se loi "subscribeSyncEvents is not a function" va SSE khong bao gio
+    // duoc subscribe (nut Sync/Lam moi khong tu quay du webhook da chay xong that su).
+    window.subscribeSyncEvents = function (source, buttonSelector) {
+      if (!window.EventSource) return;
+      const es = new EventSource('/events/sync');
+      es.addEventListener('sync', (e) => {
+        let data;
+        try { data = JSON.parse(e.data); } catch (err) { return; }
+        if (data.source !== source) return;
+        const button = document.querySelector(buttonSelector);
+        if (button) button.classList.add('spinning');
+        setTimeout(() => window.location.reload(), 700);
+      });
+    };
+  </script>
+  <div id="toast-container"></div>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+
+  {% if current_path == '/tasks' or current_path == '/staging' or current_path == '/production' %}
+  <div id="scroll-fab">
+    <button type="button" id="scroll-to-top-btn" title="Lên đầu trang" aria-label="Lên đầu trang" onclick="window.scrollTo({top: 0, behavior: 'smooth'})">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 15l-6-6-6 6"/></svg>
+    </button>
+    <button type="button" id="scroll-to-bottom-btn" title="Xuống cuối trang" aria-label="Xuống cuối trang" onclick="window.scrollTo({top: document.body.scrollHeight, behavior: 'smooth'})">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
+  </div>
+  <script>
+    // Nut cuon noi chi hien khi trang DU DAI de can cuon (tranh hien thua tren trang ngan,
+    // vd danh sach rong) - va tu an tung nut khi da o dau/cuoi trang roi (khong con tac dung).
+    (function () {
+      const fab = document.getElementById('scroll-fab');
+      const topBtn = document.getElementById('scroll-to-top-btn');
+      const bottomBtn = document.getElementById('scroll-to-bottom-btn');
+      if (!fab || !topBtn || !bottomBtn) return;
+
+      function update() {
+        const scrollable = document.body.scrollHeight > window.innerHeight + 100;
+        fab.style.display = scrollable ? 'flex' : 'none';
+        if (!scrollable) return;
+        topBtn.style.display = window.scrollY < 100 ? 'none' : 'inline-flex';
+        const nearBottom = window.innerHeight + window.scrollY >= document.body.scrollHeight - 100;
+        bottomBtn.style.display = nearBottom ? 'none' : 'inline-flex';
+      }
+
+      window.addEventListener('scroll', update);
+      window.addEventListener('resize', update);
+      window.addEventListener('load', update);
+      update();
+    })();
+  </script>
+  {% endif %}
+
+  <div class="modal-overlay" id="confirm-modal">
+    <div class="modal-box">
+      <p id="confirm-modal-message"></p>
+      <div class="modal-actions">
+        <button type="button" class="secondary" id="confirm-modal-cancel">Huỷ</button>
+        <button type="button" id="confirm-modal-ok">Xác nhận</button>
+      </div>
+    </div>
+  </div>
+  <script>
+    // Toast goc tren-phai, tu an sau AUTO_DISMISS_MS - dung chung cho MOI thong bao ket
+    // qua AJAX save (xem doAjaxSubmit ben duoi). Thay cho .inline-flash cu (ghi thang vao
+    // 1 the <div>/<span> nam san trong form, hien MAI khong bao gio tu an - day chinh la
+    // bug nguoi dung bao cao o Settings, cung anh huong Users vi dung chung co che).
+    const TOAST_AUTO_DISMISS_MS = 3500;
+    window.showToast = function (message, ok) {
+      const container = document.getElementById('toast-container');
+      if (!container) return;
+      const toast = document.createElement('div');
+      toast.className = 'toast ' + (ok ? 'toast-ok' : 'toast-err');
+      toast.innerHTML = '<span>' + (ok ? '✅' : '⚠️') + '</span><span></span>';
+      toast.querySelector('span:last-child').textContent = message;
+      container.appendChild(toast);
+      const remove = () => {
+        toast.classList.add('toast-out');
+        toast.addEventListener('animationend', () => toast.remove(), { once: true });
+      };
+      setTimeout(remove, TOAST_AUTO_DISMISS_MS);
+    };
+
+    // Doc lai toast da luu tam truoc luc reload (xem nhanh "else if (data.ok)" trong
+    // doAjaxSubmit ben duoi) - hien NGAY khi trang moi vua load xong, roi xoa khoi
+    // sessionStorage de khong hien lai neu nguoi dung F5 thu cong sau do.
+    (function () {
+      // Flash tu server qua query string ?ok=..&msg=.. (PRG pattern - cac form KHONG phai
+      // ajax-form, vd Tao request o task_form.html) - truoc day render thanh 1 banner tinh
+      // o dau <main>, khong bao gio tu an. Doi sang cung toast dung chung, nhat quan voi
+      // moi thong bao khac trong app.
+      {% if flash_msg %}
+      window.showToast({{ flash_msg | tojson }}, {{ 'true' if flash_ok == '1' else 'false' }});
+      {% endif %}
+
+      const raw = sessionStorage.getItem('pendingToast');
+      if (!raw) return;
+      sessionStorage.removeItem('pendingToast');
+      try {
+        const { message, ok } = JSON.parse(raw);
+        window.showToast(message, ok);
+      } catch (err) {
+        // JSON hong/rac trong sessionStorage: bo qua am tham, khong lam vo trang.
+      }
+    })();
+
+    // Form co class="ajax-form" submit qua fetch() thay vi submit that (redirect sinh
+    // URL ?ok=..&msg=.. va load lai trang). Neu form co .inline-flash (settings/users) thi
+    // hien ket qua qua toast NGAY (xem showToast o tren), khong reload; neu khong (danh
+    // sach task, Group/Project...) thi luu toast tam qua sessionStorage + reload trang
+    // (giu nguyen URL) khi thanh cong - toast tu hien lai sau khi trang moi load xong (xem
+    // doan doc sessionStorage o tren), tranh tinh trang reload am tham khong bao gi ca nhu
+    // truoc (bug nguoi dung bao cao o Group/Project). Loi thi alert() nhu cu.
+    // parseDmyDatetime/formatDmyDatetime/initDmyPicker (dung cho cac o nhap gio dang text
+    // "dd/mm/yyyy hh:mm") dinh nghia o script RIENG phia truoc, xem comment o do - vi cac
+    // template con goi initDmyPicker() ngay khi script cua chung chay (khong doi event),
+    // can co san truoc khi noi dung trang con duoc parse.
+    window.doAjaxSubmit = async function (form) {
+      const button = form.querySelector('button[type="submit"]');
+      const flashBox = form.querySelector('.inline-flash');
+      // Nut co the tu khai bao data-processing-label (vd nut "Restart" o
+      // staging.html/production.html) de doi tam nhan trong luc cho response - CHI co
+      // hieu luc khi attribute nay duoc dat, KHONG anh huong nut/form nao khac dang co
+      // san (Luu/Sync/Bat/Tat... deu khong dat attribute nay).
+      const originalLabel = button ? button.textContent : null;
+      if (button) {
+        button.disabled = true;
+        button.classList.add('spinning');
+        if (button.dataset.processingLabel) button.textContent = button.dataset.processingLabel;
+      }
+      // Loi 4 (ban vá dieu tra rate limit): nhanh thanh cong ben duoi goi
+      // window.location.reload() va cho trang tai lai - trong luc cho (vai tram ms toi vai
+      // giay) nut PHAI o trang thai disabled, khong duoc bat lai am tham nhu truoc (finally
+      // cu luon bat lai nut ngay) vi se khien nguoi dung tuong "chua an", bam lai va tao
+      // THEM 1 request Run/Rollback trung trong luc request truoc con dang cho ap dung qua
+      // reload. Co nay bao cho finally o cuoi ham biet KHONG duoc bat lai nut.
+      let reloading = false;
+      try {
+        // Bug 400: cac form ajax-form (vd task_detail.html Cancel/Reject/Approve/Run)
+        // co the KHONG co input nao (chi co button submit khong ten). Neu gui thang
+        // FormData rong qua fetch, trinh duyet tu sinh multipart/form-data voi boundary
+        // nhung khong co phan than nao ca -> server (python_multipart) parse loi
+        // "Did not find CR at end of boundary" -> tra ve 400 Bad Request, UI hien
+        // "Co loi xay ra, thu lai sau" du logic backend hoan toan dung.
+        // Doi sang URLSearchParams (enctype application/x-www-form-urlencoded) vi form
+        // rong van tao ra body hop le (chuoi rong ""), FastAPI/Starlette parse binh
+        // thuong. Repo hien khong co form ajax-form nao chua <input type="file">
+        // (da grep xac nhan), nen khong can nhanh FormData rieng cho upload file.
+        const body = new URLSearchParams(new FormData(form));
+
+        let res;
+        try {
+          res = await fetch(form.action, {
+            method: 'POST',
+            headers: { 'Accept': 'application/json' },
+            body: body,
+          });
+        } catch (networkErr) {
+          // Loi 3 (ban vá dieu tra rate limit): CHI khi fetch() THUC SU reject (mat mang,
+          // DNS loi, server khong nhan duoc request o tang network...) moi coi la "chua
+          // chac server da nhan" va fallback submit that (form.submit() native, bo qua
+          // hoan toan JS/fetch) de trinh duyet tu xu ly lai tu dau. TUYET DOI khong duoc
+          // gop chung nhanh nay voi cac loi xay ra SAU KHI fetch() da thanh cong (doc
+          // response, parse JSON, sessionStorage...) - luc do server CO THE DA NHAN va DA
+          // XU LY xong request (vd Run/Rollback that su chay), submit lai se tao ra 1
+          // request TRUNG cuc ky nguy hiem cho production.
+          form.submit();
+          return;
+        }
+
+        // Loi 3 (tiep): server tra ve khong phai JSON trong 2 truong hop can phan biet:
+        // (a) session het han -> RedirectToLogin (app/main.py) tra RedirectResponse 303
+        //     toi /auth/login, fetch() TU DONG follow redirect nay va tra ve response cuoi
+        //     cung la trang HTML dang nhap (res.redirected = true) - hanh vi dung la
+        //     DIEU HUONG nguoi dung sang trang dang nhap that, KHONG PHAI resubmit am tham.
+        // (b) loi ha tang khac ma server DA XU LY/DA NHAN request roi moi loi luc tra ve
+        //     (502/504 HTML tu nginx, 500 PlainTextResponse mac dinh cua Starlette...) ->
+        //     chi bao loi cho nguoi dung tu quyet dinh thu lai, TUYET DOI khong submit lai.
+        const contentType = res.headers.get('content-type') || '';
+        if (!contentType.includes('application/json')) {
+          if (res.redirected) {
+            window.location.href = res.url;
+          } else {
+            alert('Có lỗi xảy ra, thử lại sau.');
+          }
+          return;
+        }
+
+        let data;
+        try {
+          data = await res.json();
+        } catch (parseErr) {
+          // Header bao json nhung body khong parse duoc (hiem gap, vd bi cat giua chung do
+          // timeout) - server van CO THE da xu ly xong, khong duoc submit lai, chi bao loi.
+          alert('Có lỗi xảy ra, thử lại sau.');
+          return;
+        }
+
+        if (flashBox) {
+          window.showToast(data.message, data.ok);
+        } else if (form.dataset.noReload === '1') {
+          // Form tu quan ly giao dien sau khi AJAX xong, KHONG reload trang (vd nut
+          // "Restart" o staging.html/production.html: can giu nguyen trang de doi tam
+          // nhan nut thanh "Da khoi dong lai" thay vi mat het DOM do reload() nhu nhanh
+          // ben duoi). CHI form nao tu dat data-no-reload="1" moi di nhanh nay - moi form
+          // khac dang co san (Group/Project, danh sach task, Bat/Tat...) khong dat
+          // attribute nay nen hanh vi reload cu GIU NGUYEN 100%.
+          if (data.ok && button && button.dataset.successLabel) {
+            button.textContent = button.dataset.successLabel;
+            setTimeout(() => { button.textContent = originalLabel; }, 3000);
+          } else if (button) {
+            button.textContent = originalLabel;
+          }
+          if (!data.ok) alert(data.message || 'Có lỗi xảy ra, thử lại sau.');
+        } else if (data.ok) {
+          // Form khong co .inline-flash (Group/Project, danh sach task...) truoc day
+          // reload() AM THAM, khong he bao thanh cong - nguoi dung bao mat "Luu ma khong
+          // thay gi". reload() xoa het JS/DOM hien tai nen khong the goi showToast() TRUOC
+          // roi reload ngay (toast se bien mat tuc thi cung luc voi trang). Luu tam thong
+          // diep vao sessionStorage, reload, roi tu hien lai NGAY SAU KHI TRANG MOI VUA
+          // load xong (xem doan doc lai o duoi script nay) - dam bao nguoi dung luon thay
+          // duoc xac nhan "Da luu" du reload nhanh hay cham.
+          //
+          // Loi 2 (ban vá dieu tra rate limit): sessionStorage.setItem() phai nam trong
+          // try/catch RIENG cua no, TACH BIET voi khoi try o tren dung cho fetch/POST. Day
+          // chi la buoc luu tam de hien lai toast SAU reload, hoan toan khong lien quan gi
+          // toi ket qua POST (POST o tren DA thanh cong roi, data.ok da la true). Neu
+          // setItem loi (Safari private mode chan sessionStorage, QuotaExceededError...)
+          // thi bo qua am tham - KHONG duoc de loi nay lan ra ngoai roi rot vao nhanh
+          // resubmit, vi request nay da thanh cong, submit lai se tao request TRUNG.
+          try {
+            sessionStorage.setItem('pendingToast', JSON.stringify({ message: data.message, ok: true }));
+          } catch (storageErr) {
+            // Bo qua am tham: toast "Da luu" se khong hien lai sau reload nhung khong
+            // anh huong gi den ket qua thao tac (da thanh cong).
+          }
+          reloading = true;
+          window.location.reload();
+        } else {
+          alert(data.message || 'Có lỗi xảy ra, thử lại sau.');
+        }
+      } finally {
+        // Loi 1 (ban vá dieu tra rate limit, nghiem trong nhat): TRUOC DAY co
+        // form.dataset.confirmed = '1' (dat khi bam OK trong modal xac nhan, xem
+        // okBtn.click ben duoi) khong bao gio bi xoa. Neu lan Run/bulk-Run dau THAT BAI
+        // (nhanh alert() hoac loi o tren - trang KHONG reload nen DOM/JS state van con
+        // nguyen), lan bam Run/bulk-Run tiep theo se bi bo qua hop xac nhan hoan toan (mat
+        // 1 chot an toan khi deploy production), va setupBulkForm() (task_list.html) se
+        // return SOM ngay dong dau listener submit, KHONG dung lai danh sach input
+        // name="task_ids" theo lua chon MOI - gui nham danh sach task_ids CU tu lan truoc.
+        // Xoa co o day (chay sau MOI lan goi doAjaxSubmit, du thanh cong hay that bai) dam
+        // bao lan submit tiep theo (neu con o lai trang, tuc la lan thanh cong da reload
+        // mat DOM nay roi nen khong con y nghia) luon coi nhu CHUA xac nhan, hop thoai hien
+        // lai dung nhu thiet ke va setupBulkForm() dung lai duoc task_ids moi.
+        delete form.dataset.confirmed;
+        // Loi 4 (tiep): chi bat lai nut khi KHONG dang cho reload - xem bien reloading o
+        // dau ham.
+        if (button && !reloading) { button.disabled = false; button.classList.remove('spinning'); }
+      }
+    };
+
+    (function () {
+      const overlay = document.getElementById('confirm-modal');
+      const msgEl = document.getElementById('confirm-modal-message');
+      const okBtn = document.getElementById('confirm-modal-ok');
+      const cancelBtn = document.getElementById('confirm-modal-cancel');
+      let pendingForm = null;
+
+      function closeModal() {
+        overlay.classList.remove('open');
+        pendingForm = null;
+      }
+
+      cancelBtn.addEventListener('click', closeModal);
+      overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) closeModal();
+      });
+
+      okBtn.addEventListener('click', () => {
+        const form = pendingForm;
+        closeModal();
+        if (!form) return;
+        form.dataset.confirmed = '1';
+        if (form.classList.contains('ajax-form')) {
+          window.doAjaxSubmit(form);
+        } else {
+          form.requestSubmit ? form.requestSubmit() : form.submit();
+        }
+      });
+
+      // Form co attribute data-confirm se hien modal nay thay vi confirm() mac dinh cua
+      // trinh duyet. Form ajax-form khong co data-confirm (hoac da confirmed) thi di
+      // thang qua fetch(), khong submit that - phai xu ly ca 2 truong hop trong CUNG 1
+      // listener nay (khong tach rieng o template khac) de tranh 2 listener cung bat
+      // 1 submit event roi dam vao nhau (fetch ban dau chi khi chua xac nhan xong).
+      document.addEventListener('submit', (e) => {
+        const form = e.target;
+        const message = form.getAttribute('data-confirm');
+        if (message && form.dataset.confirmed !== '1') {
+          e.preventDefault();
+          msgEl.textContent = message;
+          okBtn.className = form.getAttribute('data-confirm-style') || '';
+          pendingForm = form;
+          overlay.classList.add('open');
+          return;
+        }
+        if (form.classList.contains('ajax-form')) {
+          e.preventDefault();
+          window.doAjaxSubmit(form);
+        }
+      });
+    })();
+  </script>
+</body>
+</html>

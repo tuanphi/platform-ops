@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block title %}Cấu hình General{% endblock %}
+{% block content %}
+
+<form method="post" action="/settings/general" class="card ajax-form">
+  <input type="hidden" name="section" value="catalog">
+  <h3 style="margin-top:0;">Catalog (Group/Project)</h3>
+  <div class="grid" style="grid-template-columns: 1fr; gap:0.75rem; max-width:640px;">
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Thư mục charts trên nhánh staging</div>
+      <input type="text" name="catalog_charts_dir" value="{{ setting.catalog_charts_dir }}" required style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Thư mục loại trừ khi Sync (phân cách bởi dấu phẩy)</div>
+      <input type="text" name="catalog_excluded_dirs" value="{{ setting.catalog_excluded_dirs }}" style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Template đường dẫn file version (giữ nguyên {project}/{application})</div>
+      <input type="text" name="chart_values_file_template" value="{{ setting.chart_values_file_template }}" required style="width:100%;">
+    </label>
+  </div>
+  <div class="inline-flash" style="display:none;"></div>
+  <div style="margin-top:1rem;"><button type="submit">Lưu</button></div>
+</form>
+
+<form method="post" action="/settings/general" class="card ajax-form">
+  <input type="hidden" name="section" value="git">
+  <h3 style="margin-top:0;">Git repo Helm charts</h3>
+  <p style="font-size:0.8rem; color:#888; margin-top:0;">Credential (user/token) vẫn cấu hình riêng qua biến môi trường <code>GIT_REMOTE_CREDENTIALS</code>, không sửa được ở đây.</p>
+  <div class="grid" style="grid-template-columns: 1fr; gap:0.75rem; max-width:640px;">
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Repo URL (không kèm credential, vd: https://gitlab.g-pay.vn/devops/helm/applications.git)</div>
+      <input type="text" name="git_remote_repo_url" value="{{ setting.git_remote_repo_url }}" required style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Email tác giả commit</div>
+      <input type="text" name="git_commit_author_email" value="{{ setting.git_commit_author_email }}" required style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Tên tác giả commit</div>
+      <input type="text" name="git_commit_author_name" value="{{ setting.git_commit_author_name }}" required style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Nhánh staging</div>
+      <input type="text" name="git_branch_staging" value="{{ setting.git_branch_staging }}" required style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Nhánh master</div>
+      <input type="text" name="git_branch_master" value="{{ setting.git_branch_master }}" required style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Đường dẫn file values-staging (tính năng Thay đổi pod Staging, trên nhánh staging)</div>
+      <input type="text" name="staging_values_file_path" value="{{ setting.staging_values_file_path }}" required style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Đường dẫn file values-production (tính năng thay đổi replicas Production, trên nhánh master)</div>
+      <input type="text" name="production_values_file_path" value="{{ setting.production_values_file_path }}" required style="width:100%;">
+    </label>
+  </div>
+  <label style="display:flex; align-items:center; gap:0.5rem; margin-top:0.75rem;">
+    <input type="checkbox" name="production_use_merge_request" {% if setting.production_use_merge_request %}checked{% endif %}>
+    Tạo Merge Request khi thay đổi production
+  </label>
+  <div class="inline-flash" style="display:none;"></div>
+  <div style="margin-top:1rem;"><button type="submit">Lưu</button></div>
+</form>
+
+<form method="post" action="/settings/general" class="card ajax-form">
+  <input type="hidden" name="section" value="rollback">
+  <h3 style="margin-top:0;">Task</h3>
+  <label>
+    <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Thời gian cho phép Rollback sau khi Done (giây)</div>
+    <input type="number" name="rollback_allowed_seconds" value="{{ setting.rollback_allowed_seconds }}" min="1" required style="width:160px;">
+  </label>
+  <label style="display:block; margin-top:0.75rem;">
+    <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Số task worker nền cho phép ở trạng thái Running cùng lúc (task khác vào hàng đợi "Queued" chờ tới lượt) - 0 = không giới hạn</div>
+    <input type="number" name="max_concurrent_running_tasks" value="{{ setting.max_concurrent_running_tasks }}" min="0" required style="width:160px;">
+  </label>
+  <label style="display:block; margin-top:0.75rem;">
+    <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Khoảng cách tối thiểu giữa 2 lần cảnh báo lặp lại cho cùng 1 task Running quá lâu (phút) - 0 = chỉ cảnh báo một lần</div>
+    <input type="number" name="running_alert_repeat_minutes" value="{{ setting.running_alert_repeat_minutes }}" min="0" required style="width:160px;">
+  </label>
+  <div class="inline-flash" style="display:none;"></div>
+  <div style="margin-top:1rem;"><button type="submit">Lưu</button></div>
+</form>
+
+<form method="post" action="/settings/general" class="card ajax-form">
+  <input type="hidden" name="section" value="auth">
+  <h3 style="margin-top:0;">Đăng nhập</h3>
+  <label>
+    <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Số giờ ghi nhớ đăng nhập khi user tick "Ghi nhớ đăng nhập" ({{ session_remember_min_hours }}-{{ session_remember_max_hours }} giờ)</div>
+    <input type="number" name="session_remember_hours" value="{{ setting.session_remember_hours }}" min="{{ session_remember_min_hours }}" max="{{ session_remember_max_hours }}" required style="width:160px;">
+  </label>
+  <p style="font-size:0.8rem; color:#888; margin-bottom:0;">Có hiệu lực ngay từ request kế tiếp (kể cả các phiên đang đăng nhập sẵn), không cần restart app.</p>
+  <div class="inline-flash" style="display:none;"></div>
+  <div style="margin-top:1rem;"><button type="submit">Lưu</button></div>
+</form>
+
+<form method="post" action="/settings/general" class="card ajax-form">
+  <input type="hidden" name="section" value="argocd">
+  <h3 style="margin-top:0;">ArgoCD (chỉ đọc)</h3>
+  <p style="font-size:0.8rem; color:#888; margin-top:0;">URL API + token (nhạy cảm) vẫn cấu hình qua biến môi trường <code>ARGOCD_URL_API</code>/<code>ARGOCD_TOKEN</code>, không sửa được ở đây.</p>
+  <div class="grid" style="grid-template-columns: 1fr; gap:0.75rem; max-width:640px;">
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">URL trang Application (vd: https://argocd.example.com/applications/)</div>
+      <input type="text" name="argocd_url_application" value="{{ setting.argocd_url_application }}" style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Hậu tố tên Application trên ArgoCD (dùng cho tính năng theo dõi Running khi Deploy)</div>
+      <input type="text" name="argocd_application_postfix" value="{{ setting.argocd_application_postfix }}" style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Hậu tố tên Application trên ArgoCD dùng cho nút Restart ở Staging (vd: -staging)</div>
+      <input type="text" name="argocd_application_postfix_staging" value="{{ setting.argocd_application_postfix_staging }}" style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Hậu tố tên Application trên ArgoCD dùng cho nút Restart ở Production (vd: -production)</div>
+      <input type="text" name="argocd_application_postfix_production" value="{{ setting.argocd_application_postfix_production }}" style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Rate limit khi Restart - thời gian chờ tối thiểu giữa 2 lần Restart cùng 1 app (giây)</div>
+      <input type="number" name="restart_cooldown_seconds" value="{{ setting.restart_cooldown_seconds }}" min="1" required style="width:160px;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Cảnh báo nếu Running quá lâu mà chưa khớp version (phút)</div>
+      <input type="number" name="running_alert_after_minutes" value="{{ setting.running_alert_after_minutes }}" min="1" required style="width:160px;">
+    </label>
+  </div>
+  <div class="inline-flash" style="display:none;"></div>
+  <div style="margin-top:1rem;"><button type="submit">Lưu</button></div>
+</form>
+
+<form method="post" action="/settings/general" class="card ajax-form">
+  <input type="hidden" name="section" value="notify">
+  <h3 style="margin-top:0;">Thông báo</h3>
+  <label style="display:block; margin-bottom:0.75rem;">
+    <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Telegram chat ID hệ thống (nhận thông báo mặc định)</div>
+    <input type="text" name="telegram_chat_id_system" value="{{ setting.telegram_chat_id_system }}" style="width:100%; max-width:320px;">
+  </label>
+  <label style="display:block; margin-bottom:0.75rem;">
+    <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Telegram chat ID Staging (thông báo Thay đổi pod Staging)</div>
+    <input type="text" name="telegram_chat_id_staging" value="{{ setting.telegram_chat_id_staging }}" style="width:100%; max-width:320px;">
+  </label>
+  <label style="display:block; margin-bottom:0.75rem;">
+    <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Telegram chat ID Production (thông báo Thay đổi pod Production)</div>
+    <input type="text" name="telegram_chat_id_production" value="{{ setting.telegram_chat_id_production }}" style="width:100%; max-width:320px;">
+  </label>
+  <div style="font-size:0.75rem; color:#999; margin-bottom:0.75rem;">Dùng chung bot token với hệ thống (TELEGRAM_BOT_TOKEN trong .env), chỉ khác chat ID/channel.</div>
+  <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+    <input type="checkbox" name="enable_staging_notify" {% if setting.enable_staging_notify %}checked{% endif %}>
+    Bật gửi thông báo Telegram Staging
+  </label>
+  <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+    <input type="checkbox" name="enable_production_notify" {% if setting.enable_production_notify %}checked{% endif %}>
+    Bật gửi thông báo Telegram Production
+  </label>
+  <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.75rem;">
+    <input type="checkbox" name="enable_mail" {% if setting.enable_mail %}checked{% endif %}>
+    Bật gửi email thông báo
+  </label>
+  <div class="grid" style="grid-template-columns: 1fr; gap:0.75rem; max-width:640px;">
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Mail from</div>
+      <input type="text" name="mail_from" value="{{ setting.mail_from }}" required style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Mail to (phân cách bởi dấu phẩy)</div>
+      <input type="text" name="mail_to" value="{{ setting.mail_to }}" style="width:100%;">
+    </label>
+    <label>
+      <div style="font-size:0.8rem; color:#666; margin-bottom:0.25rem;">Tiêu đề mail</div>
+      <input type="text" name="mail_subject" value="{{ setting.mail_subject }}" required style="width:100%;">
+    </label>
+  </div>
+  <div class="inline-flash" style="display:none;"></div>
+  <div style="margin-top:1rem;"><button type="submit">Lưu</button></div>
+</form>
+
+<form method="post" action="/settings/general" class="card ajax-form">
+  <input type="hidden" name="section" value="scheduler">
+  <h3 style="margin-top:0;">Scheduler</h3>
+  <label style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+    <input type="checkbox" name="enable_scheduler" {% if setting.enable_scheduler %}checked{% endif %}>
+    Bật scheduler nền (nhắc giờ chạy, đối chiếu ArgoCD, cảnh báo, auto deploy, auto sync catalog)
+  </label>
+  <label style="display:flex; align-items:center; gap:0.5rem;">
+    <input type="checkbox" name="enable_30min_reminder" {% if setting.enable_30min_reminder %}checked{% endif %}>
+    Nhắc trước 30 phút cho task Approved sắp đến giờ chạy
+  </label>
+  <p style="font-size:0.8rem; color:#888; margin-bottom:0;">Bật/tắt scheduler có hiệu lực ngay, không cần restart app. Công tắc này KHÔNG ảnh hưởng việc xử lý hàng đợi Run/Rollback (task Queued vẫn luôn được chạy dù tắt scheduler) - chỉ bật/tắt các job phụ nêu trên.</p>
+  <div class="inline-flash" style="display:none;"></div>
+  <div style="margin-top:1rem;"><button type="submit">Lưu</button></div>
+</form>
+{% endblock %}
