@@ -96,7 +96,7 @@ def _repo_lock(directory: str, label: str, timeout: float | None = None) -> Iter
             label,
             effective_timeout,
         )
-        raise GitError(
+        raise GitLockBusyError(
             f"Hệ thống đang bận xử lý một thao tác Git khác trên '{label}' "
             "(Run/Rollback/Sync catalog), vui lòng thử lại sau ít giây"
         ) from exc
@@ -138,6 +138,45 @@ _SAFE_GIT_BRANCH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 _SAFE_REPO_URL_SCHEMES = ("https://", "ssh://")
 
 
+def commit_web_url(repo_url: str, sha: str) -> str:
+    """Link GitLab xem 1 commit tu git_remote_repo_url: "https://host/g/repo.git" hoac
+    "ssh://git@host:port/g/repo.git" -> "https://host/g/repo/-/commit/<sha>" (bo
+    credential/user, bo port ssh). Tra "" neu URL khong dung dinh dang ho tro."""
+    scheme, sep, rest = (repo_url or "").strip().partition("://")
+    if not sep or scheme not in ("https", "ssh") or not sha:
+        return ""
+    host, _, path = rest.partition("/")
+    host = host.rsplit("@", 1)[-1]
+    if scheme == "ssh":
+        host = host.split(":", 1)[0]
+    path = path.rstrip("/")
+    if path.endswith(".git"):
+        path = path[:-4]
+    if not host or not path:
+        return ""
+    return f"https://{host}/{path}/-/commit/{sha}"
+
+
+def merge_request_web_url(push_output: str, repo_url: str, source_branch: str) -> str:
+    """Link MR tu output `git push -o merge_request.create`; khong co thi link danh sach MR
+    loc theo nhanh nguon (chi co dung MR do). "" neu khong dung duoc URL repo."""
+    match = _MERGE_REQUEST_URL_RE.search(push_output or "")
+    if match:
+        return redact_credentials(match.group(0))
+    base = commit_web_url(repo_url, "x")
+    if not base:
+        return ""
+    return base[: -len("/-/commit/x")] + f"/-/merge_requests?scope=all&state=all&source_branch={source_branch}"
+
+
+def _head_commit_url(repo_dir: str, repo_url: str) -> str:
+    try:
+        sha = _run(["git", "rev-parse", "HEAD"], cwd=repo_dir).strip()
+    except GitError:
+        return ""
+    return commit_web_url(repo_url, sha)
+
+
 def redact_credentials(text: str) -> str:
     """Public alias - dung o cac noi khac (vd catalog_router khi hien loi ra UI) lam
     lop phong thu thu 2, phong truong hop 1 exception khong phai GitError cung chua
@@ -151,6 +190,12 @@ def _redact_credentials(text: str) -> str:
 
 class GitError(RuntimeError):
     pass
+
+
+class GitLockBusyError(GitError):
+    """Khong lay duoc git lock vi thao tac Git khac dang giu (loi TAM THOI, thu lai sau la
+    duoc). Van la GitError nen moi cho dang bat GitError giu nguyen hanh vi - chi job chay
+    lich (menu Schedule) phan biet loai nay de thu lai o phut sau thay vi bao that bai."""
 
 
 def validate_safe_path_segment(value: str, field_name: str) -> None:
@@ -204,6 +249,18 @@ def _run(args: list[str], cwd: str) -> str:
     if result.returncode != 0:
         raise GitError(_redact_credentials(f"git {' '.join(args)} failed: {result.stderr.strip()}"))
     return result.stdout
+
+
+def _run_with_stderr(args: list[str], cwd: str) -> str:
+    """Nhu _run nhung tra ve CA stdout + stderr - dung cho `git push -o merge_request.create`:
+    GitLab in link MR vua tao vao stderr ("remote: View merge request ... <url>")."""
+    result = subprocess.run(args, cwd=cwd, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise GitError(_redact_credentials(f"git {' '.join(args)} failed: {result.stderr.strip()}"))
+    return f"{result.stdout}\n{result.stderr}"
+
+
+_MERGE_REQUEST_URL_RE = re.compile(r"https?://[^\s]+/-/merge_requests/\d+")
 
 
 def _build_authenticated_url(repo_url: str, credentials: str) -> str:
@@ -586,6 +643,12 @@ class ReplicasToggleResult:
     # dung co nay de KHONG ghi de EnvAppCache.replicas (write_through_cache), tranh UI hien
     # sai gia tri nhu da ap dung xong trong khi MR chua duoc merge.
     pending_merge_request: bool = False
+    # Link xem commit vua push tren GitLab (rong neu khong dung duoc URL) - chi de hien
+    # trong tin Telegram, xem commit_web_url().
+    commit_url: str = ""
+    # Link Merge Request vua tao (chi che do production_use_merge_request) - lay tu output
+    # cua git push; khong doc duoc thi la link danh sach MR loc theo nhanh tam.
+    merge_request_url: str = ""
 
 
 def _is_chart_application_dir(path: Path) -> bool:
@@ -674,8 +737,9 @@ def _apply_env_replicas_and_push(
         _run(["git", "add", rel_path], cwd=repo_dir)
         _run(["git", "commit", "-m", commit_message], cwd=repo_dir)
         _run(["git", "push"], cwd=repo_dir)
+        commit_url = _head_commit_url(repo_dir, config.git_remote_repo_url)
 
-    return ReplicasToggleResult(ok=True, message="Đã cập nhật", changed=tuple(updated))
+    return ReplicasToggleResult(ok=True, message="Đã cập nhật", changed=tuple(updated), commit_url=commit_url)
 
 
 def _create_merge_request_push(
@@ -731,7 +795,7 @@ def _create_merge_request_push(
         _run(["git", "config", "user.name", config.git_commit_author_name], cwd=repo_dir)
         _run(["git", "add", rel_path], cwd=repo_dir)
         _run(["git", "commit", "-m", commit_message], cwd=repo_dir)
-        _run(
+        push_output = _run_with_stderr(
             [
                 "git",
                 "push",
@@ -747,11 +811,15 @@ def _create_merge_request_push(
             ],
             cwd=repo_dir,
         )
+        commit_url = _head_commit_url(repo_dir, config.git_remote_repo_url)
+        merge_request_url = merge_request_web_url(push_output, config.git_remote_repo_url, temp_branch)
 
     return ReplicasToggleResult(
         ok=True,
         message=f"Đã tạo Merge Request vào nhánh {config.target_branch}",
         changed=tuple(updated),
+        commit_url=commit_url,
+        merge_request_url=merge_request_url,
         pending_merge_request=True,
     )
 
@@ -785,6 +853,15 @@ def _bulk_toggle_env_apps(
     return _push_env_replicas(entries, commit_message, config, ensure_repo, repo_lock)
 
 
+def _set_env_replicas(
+    env_label: str, entries: list[tuple[str, str, int]], actor_email: str, config, ensure_repo, repo_lock
+) -> ReplicasToggleResult:
+    """Dat replicas RIENG cho tung app trong 1 commit (vd bat lai hang loat, moi app ve dung
+    so pod truoc khi tat) - khac _bulk_toggle_env_apps (cung 1 gia tri 0/1 cho ca batch)."""
+    commit_message = f"{actor_email}: Set replicas for {len(entries)} apps ({env_label})"
+    return _push_env_replicas(entries, commit_message, config, ensure_repo, repo_lock)
+
+
 # --- Staging (nhanh staging) ---
 
 
@@ -806,6 +883,12 @@ def bulk_toggle_staging_apps(
     return _bulk_toggle_env_apps(
         "staging", apps, enabled, actor_email, config, ensure_staging_repo, staging_repo_lock
     )
+
+
+def set_staging_replicas(
+    entries: list[tuple[str, str, int]], actor_email: str, config: EnvReplicasPushConfig
+) -> ReplicasToggleResult:
+    return _set_env_replicas("staging", entries, actor_email, config, ensure_staging_repo, staging_repo_lock)
 
 
 def turn_off_all_staging(actor_email: str, config: EnvReplicasPushConfig) -> ReplicasToggleResult:
@@ -848,8 +931,9 @@ def turn_off_all_staging(actor_email: str, config: EnvReplicasPushConfig) -> Rep
         _run(["git", "add", rel_path], cwd=staging_dir)
         _run(["git", "commit", "-m", f"{actor_email}: Disable all staging ({len(updated)} apps)"], cwd=staging_dir)
         _run(["git", "push"], cwd=staging_dir)
+        commit_url = _head_commit_url(staging_dir, config.git_remote_repo_url)
 
-    return ReplicasToggleResult(ok=True, message="Đã tắt tất cả staging", changed=tuple(updated))
+    return ReplicasToggleResult(ok=True, message="Đã tắt tất cả staging", changed=tuple(updated), commit_url=commit_url)
 
 
 # --- Production (nhanh master, dung CHUNG checkout/lock voi Run/Rollback) ---
@@ -865,6 +949,12 @@ def toggle_production_app(
     return _toggle_env_app(
         "production", project, application, replicas, actor_email, config, ensure_master_repo, master_repo_lock
     )
+
+
+def set_production_replicas(
+    entries: list[tuple[str, str, int]], actor_email: str, config: EnvReplicasPushConfig
+) -> ReplicasToggleResult:
+    return _set_env_replicas("production", entries, actor_email, config, ensure_master_repo, master_repo_lock)
 
 
 def bulk_toggle_production_apps(

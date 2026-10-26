@@ -88,6 +88,28 @@ class User(Base):
     can_toggle_restart_production: Mapped[bool] = mapped_column(Boolean, default=False)
     """Tuong tu can_toggle_restart_staging, rieng cho Production - DOC LAP hoan toan.
     Hien tren UI la cot "Production Restart". Xem can_restart_production."""
+    can_schedule_restart_staging: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Quyen RIENG cua menu Schedule - tao/sua/xoa lich tu dong Restart Staging. DOC LAP
+    hoan toan voi can_toggle_restart_staging (nut Restart bam tay o menu Staging), khong
+    ke thua qua lai. Hien tren UI la cot "Schedule Restart Staging". Xem can_schedule()."""
+    can_schedule_restart_production: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Tuong tu can_schedule_restart_staging, rieng cho Production."""
+    can_schedule_toggle_staging: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Quyen RIENG cua menu Schedule - tao/sua/xoa lich tu dong Tat/Bat app Staging. DOC
+    LAP voi can_toggle_staging (sua replicas bam tay). Hien tren UI la cot "Schedule
+    Tắt/Bật Staging"."""
+    can_schedule_toggle_production: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Tuong tu can_schedule_toggle_staging, rieng cho Production."""
+    can_schedule_restart_view_staging: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Quyen CHI XEM tab "Tu dong restart" cua menu Schedule (Staging) - khong tao/sua/tam
+    dung/xoa duoc. UI: "Restart view" (nhom Schedule). Xem can_view_schedule()."""
+    can_schedule_restart_view_production: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Tuong tu can_schedule_restart_view_staging, rieng cho Production."""
+    can_schedule_toggle_view_staging: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Quyen CHI XEM tab "Tu dong tat/bat app" cua menu Schedule (Staging). UI: "Tat/Bat
+    view" (nhom Schedule)."""
+    can_schedule_toggle_view_production: Mapped[bool] = mapped_column(Boolean, default=False)
+    """Tuong tu can_schedule_toggle_view_staging, rieng cho Production."""
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
 
     granted_groups: Mapped[list["Group"]] = relationship(secondary=group_admin_access, back_populates="granted_users")
@@ -214,6 +236,31 @@ class User(Base):
         can_restart_production/can_view_production). KHONG dung de gac hanh dong sua/mutate
         (xem docstring can_access_staging)."""
         return self.can_write_production or self.can_restart_production or self.can_view_production
+
+    def can_schedule(self, env: str, action: str) -> bool:
+        """Quyen menu Schedule theo (env, loai lich) - action "restart" dung cot Schedule
+        Restart, "stop"/"start" dung cot Schedule Tat/Bat. KHONG ke thua quyen Restart/
+        Replicas cua menu Staging/Production. Super Admin luon duoc."""
+        if self.role == Role.SUPER_ADMIN:
+            return True
+        kind = "restart" if action == "restart" else "toggle"
+        return bool(getattr(self, f"can_schedule_{kind}_{env}", False))
+
+    def can_view_schedule(self, env: str, action: str | None = None) -> bool:
+        """Xem duoc lich loai `action` cua env: quyen "view" HOAC "edit" cua DUNG loai do -
+        action="restart": Restart view/edit (tab restart); "stop"/"start": Tat/Bat view/edit
+        (tab tat/bat); action=None: bat ky loai nao (dung de hien menu). Super Admin luon
+        duoc (qua can_schedule)."""
+        if action is None:
+            return self.can_view_schedule(env, "restart") or self.can_view_schedule(env, "start")
+        kind = "restart" if action == "restart" else "toggle"
+        return bool(getattr(self, f"can_schedule_{kind}_view_{env}", False)) or self.can_schedule(env, action)
+
+    @property
+    def can_access_schedule(self) -> bool:
+        """Vao duoc menu Schedule - can it nhat 1 quyen Schedule (View/Lich Restart/Lich
+        Tat-Bat) o 1 moi truong."""
+        return any(self.can_view_schedule(env) for env in ("staging", "production"))
 
 
 class Group(Base):
@@ -529,3 +576,68 @@ class RestartLog(Base):
     message: Mapped[str] = mapped_column(Text, default="")
 
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AppSchedule(Base):
+    """Lich hen gio cho menu Schedule (/schedule): tu dong Restart (action="restart") hoac
+    Tat/Bat app (action="stop" -> replicas=0, action="start" -> replicas=1) tren
+    staging/production. Job scheduler.job_run_app_schedules quet moi phut cac dong
+    is_active=True co next_run_at <= now, chay bang CHINH ham cua nut bam tay
+    (restart_service.restart_app / {staging,production}_service.toggle_app) duoi danh
+    nghia nguoi tao lich (quyen duoc kiem LAI luc chay, khong chi luc tao).
+
+    Gio nhap (time_of_day/run_once_at) theo GMT+7; next_run_at/run_once_at luu UTC giong
+    cac truong datetime khac (xem app/timeutil.py)."""
+
+    __tablename__ = "app_schedule"
+    __table_args__ = (Index("ix_app_schedule_active_next_run", "is_active", "next_run_at"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    action: Mapped[str] = mapped_column(String(20))
+    """"restart" | "stop" | "start"."""
+    env: Mapped[str] = mapped_column(String(20))
+    project: Mapped[str] = mapped_column(String(255))
+    application: Mapped[str] = mapped_column(String(255))
+
+    frequency: Mapped[str] = mapped_column(String(20))
+    """"daily" | "weekly" | "monthly" | "once"."""
+    time_of_day: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    """"HH:MM" (GMT+7) - dung cho daily/weekly/monthly."""
+    weekday: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    """0=Thu 2 ... 6=Chu nhat - chi dung cho weekly."""
+    day_of_month: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    """1-31 - chi dung cho monthly; thang khong du ngay thi chay ngay cuoi thang."""
+    run_once_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    """UTC - chi dung cho once."""
+
+    next_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
+    last_ok: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    last_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    last_skipped: Mapped[bool] = mapped_column(Boolean, default=False)
+    """True neu lan chay gan nhat BO QUA (app da o dung trang thai: lich Tat ma app da tat,
+    lich Bat ma app dang chay) - khong commit/khong gui Telegram. Hien badge "Bo qua"."""
+
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"), nullable=True)
+    created_by_email: Mapped[str] = mapped_column(String(255))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+
+
+class AppReplicasRestore(Base):
+    """So pod cua 1 app NGAY TRUOC khi bi tat (replicas -> 0) - bat lai thi khoi phuc dung so
+    pod nay thay vi luon 1, khoi phuc xong thi xoa. Ghi/xoa tai env_toggle_service (dung
+    CHUNG cho Bat/Tat 1 app, hang loat, "Tat tat ca" o /staging|/production VA lich Tat/Bat
+    o /schedule). Khoa theo app (env, project, application). Bang rieng - EnvAppCache bi ghi
+    de moi lan dong bo git nen khong giu duoc gia tri nay."""
+
+    __tablename__ = "app_replicas_restore"
+    __table_args__ = (UniqueConstraint("env", "project", "application", name="uq_app_replicas_restore_app"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    env: Mapped[str] = mapped_column(String(20))
+    project: Mapped[str] = mapped_column(String(255))
+    application: Mapped[str] = mapped_column(String(255))
+    replicas: Mapped[int] = mapped_column(Integer)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)

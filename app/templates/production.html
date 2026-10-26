@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block title %}Replicas Production{% endblock %}
 {% block content %}
+<style>
+  th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  th.sortable:hover { color: #3699FF; }
+  th.sortable .sort-arrow { color: #3699FF; font-size: 0.75em; margin-left: 0.2rem; }
+</style>
 <div class="card">
   <div style="display:flex; align-items:flex-start; justify-content:space-between; gap:0.5rem; margin-bottom:1rem;">
     <div style="display:flex; flex-direction:column; gap:0.5rem; min-width:0; flex:1 1 auto;">
@@ -61,16 +66,17 @@
     <thead>
       <tr>
         <th></th>
-        <th>Project</th>
-        <th>Application</th>
-        <th>Trạng thái</th>
+        <th class="sortable" data-sort-key="project">Project<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="app">Application<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="replicas">Trạng thái<span class="sort-arrow"></span></th>
         <th>Bật/Tắt</th>
         <th>Restart</th>
       </tr>
     </thead>
     <tbody>
       {% for row in apps %}
-      <tr data-project="{{ row.project }}" data-app="{{ row.application }}">
+      <tr data-project="{{ row.project }}" data-app="{{ row.application }}" data-index="{{ loop.index0 }}"
+        data-replicas="{{ row.replicas if row.enabled and (row.replicas | string).isdigit() else 0 }}">
         <td>
           {% if user.can_write_production or user.can_restart_production %}
           <input type="checkbox" class="production-select" value="{{ row.project }}|{{ row.application }}">
@@ -94,7 +100,7 @@
             <input type="hidden" name="application" value="{{ row.application }}">
             <input type="hidden" name="enabled" value="{{ '1' if row.enabled else '0' }}" class="production-enabled-input">
             <button type="button" class="switch production-toggle-btn {{ 'on' if row.enabled }}" title="Bật/Tắt" {% if not user.can_write_production %}disabled{% endif %}></button>
-            <input type="number" name="replicas" min="1" value="{{ row.replicas if (row.replicas and row.replicas != '0') else 1 }}"
+            <input type="number" name="replicas" min="1" value="{{ row.replicas if (row.replicas and row.replicas != '0') else (row.restore_replicas or 1) }}"
               class="production-replicas-input" style="width:70px;" {% if not row.enabled or not user.can_write_production %}disabled{% endif %}>
             <button type="submit" {% if not user.can_write_production %}disabled{% endif %}>Lưu</button>
           </form>
@@ -299,6 +305,62 @@
         render();
       });
     }
+
+    // Sap xep theo cot (giong trang Schedule): bam tieu de 1 lan tang dan, 2 lan giam dan, 3
+    // lan ve thu tu mac dinh (data-index = thu tu server: project, application). Sap lai
+    // THU TU DOM cac dong roi render() - loc/phan trang doc dong theo thu tu DOM nen tu
+    // dung theo. "Trang thai" sap theo so pod (OFF = 0). Luu cach sap vao sessionStorage
+    // nhu bo loc/trang (trang nay hay reload sau moi thao tac).
+    const SORT_STORAGE_KEY = 'production-sort-value';
+    const sortHeaders = Array.from(document.querySelectorAll('th.sortable'));
+    let sortKey = '';
+    let sortDir = '';
+
+    function applySort() {
+      const rows = filterableRows();
+      const valueOf = (row) => (sortKey === 'replicas'
+        ? Number(row.dataset.replicas) || 0
+        : (sortKey === 'app' ? row.dataset.app : row.dataset.project).toLowerCase());
+      rows.sort((a, b) => {
+        if (sortKey) {
+          const va = valueOf(a);
+          const vb = valueOf(b);
+          const cmp = typeof va === 'number' ? va - vb : va.localeCompare(vb, 'vi');
+          if (cmp !== 0) return sortDir === 'desc' ? -cmp : cmp;
+        }
+        return Number(a.dataset.index) - Number(b.dataset.index);
+      });
+      rows.forEach((row) => filterEmptyRow.parentElement.insertBefore(row, filterEmptyRow));
+      sortHeaders.forEach((th) => {
+        th.querySelector('.sort-arrow').textContent =
+          th.dataset.sortKey === sortKey ? (sortDir === 'desc' ? '▼' : '▲') : '';
+      });
+    }
+
+    sortHeaders.forEach((th) => {
+      th.addEventListener('click', () => {
+        if (sortKey !== th.dataset.sortKey) {
+          sortKey = th.dataset.sortKey;
+          sortDir = 'asc';
+        } else if (sortDir === 'asc') {
+          sortDir = 'desc';
+        } else {
+          sortKey = '';
+          sortDir = '';
+        }
+        sessionStorage.setItem(SORT_STORAGE_KEY, sortKey ? sortKey + ':' + sortDir : '');
+        applySort();
+        currentPage = 1;
+        render();
+      });
+    });
+
+    const savedSort = (sessionStorage.getItem(SORT_STORAGE_KEY) || '').split(':');
+    if (sortHeaders.some((th) => th.dataset.sortKey === savedSort[0]) && ['asc', 'desc'].includes(savedSort[1])) {
+      sortKey = savedSort[0];
+      sortDir = savedSort[1];
+    }
+    applySort();
 
     if (filterInput) {
       const savedFilter = sessionStorage.getItem(FILTER_STORAGE_KEY);

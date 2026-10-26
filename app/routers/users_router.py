@@ -14,6 +14,29 @@ from app.services.password_service import hash_password
 router = APIRouter(prefix="/users", tags=["users"])
 templates = Jinja2Templates(directory="app/templates")
 
+# 4 quyen RIENG cua menu Schedule (kind trong URL -> cot User) - DOC LAP voi quyen
+# Restart/Replicas cua menu Staging/Production, xem User.can_schedule.
+_SCHEDULE_PERM_FLAGS = {
+    "restart-staging": "can_schedule_restart_staging",
+    "restart-production": "can_schedule_restart_production",
+    "toggle-staging": "can_schedule_toggle_staging",
+    "toggle-production": "can_schedule_toggle_production",
+    "restart-view-staging": "can_schedule_restart_view_staging",
+    "restart-view-production": "can_schedule_restart_view_production",
+    "toggle-view-staging": "can_schedule_toggle_view_staging",
+    "toggle-view-production": "can_schedule_toggle_view_production",
+}
+_SCHEDULE_PERM_LABELS = {
+    "restart-staging": "Schedule Restart edit Staging",
+    "restart-production": "Schedule Restart edit Production",
+    "toggle-staging": "Schedule Tắt/Bật edit Staging",
+    "toggle-production": "Schedule Tắt/Bật edit Production",
+    "restart-view-staging": "Schedule Restart view Staging",
+    "restart-view-production": "Schedule Restart view Production",
+    "toggle-view-staging": "Schedule Tắt/Bật view Staging",
+    "toggle-view-production": "Schedule Tắt/Bật view Production",
+}
+
 
 def _respond(request: Request, ok: bool, message: str) -> Response:
     if is_ajax(request):
@@ -72,6 +95,7 @@ def set_user_role(
                 "can_view_production": target_user.can_view_production,
                 "can_toggle_restart_staging": target_user.can_toggle_restart_staging,
                 "can_toggle_restart_production": target_user.can_toggle_restart_production,
+                **{flag: getattr(target_user, flag) for flag in _SCHEDULE_PERM_FLAGS.values()},
             }
         )
     return _respond(request, True, message)
@@ -254,3 +278,27 @@ def toggle_production_restart_permission(
             }
         )
     return _respond(request, True, f"Đã {state} quyền Restart Production cho '{target_user.email}'")
+
+
+@router.post("/{user_id}/schedule-toggle/{kind}")
+def toggle_schedule_permission(
+    request: Request,
+    user_id: int,
+    kind: str,
+    user: User = Depends(require_settings_access),
+    db: Session = Depends(get_db),
+):
+    """Cong tac cho 4 quyen RIENG cua menu Schedule (xem _SCHEDULE_PERM_FLAGS)."""
+    flag = _SCHEDULE_PERM_FLAGS.get(kind)
+    if flag is None:
+        return _respond(request, False, "Quyền không hợp lệ")
+    target_user = db.get(User, user_id)
+    if target_user is None:
+        return _respond(request, False, "User không tồn tại")
+    setattr(target_user, flag, not getattr(target_user, flag))
+    db.commit()
+    state = "bật" if getattr(target_user, flag) else "tắt"
+    message = f"Đã {state} quyền {_SCHEDULE_PERM_LABELS[kind]} cho '{target_user.email}'"
+    if is_ajax(request):
+        return JSONResponse({"ok": True, "message": message, flag: getattr(target_user, flag)})
+    return _respond(request, True, message)

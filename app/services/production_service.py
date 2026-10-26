@@ -26,7 +26,8 @@ def _push_config(db: Session) -> git_service.EnvReplicasPushConfig:
 
 
 def toggle_app(
-    db: Session, user: User, project: str, application: str, enabled: bool, replicas: int | None
+    db: Session, user: User, project: str, application: str, enabled: bool, replicas: int | None,
+    scheduled: bool = False,
 ) -> env_toggle_service.EnvActionResult:
     return env_toggle_service.toggle_app(
         db,
@@ -38,6 +39,7 @@ def toggle_app(
         ENV_LABEL,
         git_service.toggle_production_app,
         _push_config(db),
+        scheduled=scheduled,
     )
 
 
@@ -45,7 +47,8 @@ def bulk_toggle(
     db: Session, user: User, apps: list[tuple[str, str]], enabled: bool
 ) -> env_toggle_service.EnvActionResult:
     return env_toggle_service.bulk_toggle(
-        db, user, apps, enabled, ENV_LABEL, git_service.bulk_toggle_production_apps, _push_config(db)
+        db, user, apps, enabled, ENV_LABEL, git_service.bulk_toggle_production_apps, _push_config(db),
+        set_fn=git_service.set_production_replicas,
     )
 
 

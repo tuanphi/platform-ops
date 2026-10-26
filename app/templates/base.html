@@ -679,6 +679,9 @@
         {% if user and user.can_access_production %}
         <a href="/production" class="{{ 'current' if current_path == '/production' else '' }}">Production</a>
         {% endif %}
+        {% if user and user.can_access_schedule %}
+        <a href="/schedule" class="{{ 'current' if current_path == '/schedule' else '' }}">Schedule</a>
+        {% endif %}
         {% if user and user.can_manage_settings %}
         <div class="nav-dropdown">
           <button type="button" class="nav-dropdown-toggle" id="settings-toggle" aria-expanded="false">

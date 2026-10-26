@@ -1,0 +1,927 @@
+{% extends "base.html" %}
+{% block title %}Schedule{% endblock %}
+{% block content %}
+<style>
+  .schedule-tabs { display: flex; gap: 0.4rem; margin-bottom: 1rem; flex-wrap: wrap; }
+  .schedule-tabs a { padding: 0.45rem 0.95rem; border-radius: 999px; background: #f1f5f9; color: #374151; text-decoration: none; font-size: 0.9rem; font-weight: 600; }
+  .schedule-tabs a.active { background: #3699FF; color: #fff; }
+  th.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+  th.sortable:hover { color: #3699FF; }
+  th.sortable .sort-arrow { color: #3699FF; font-size: 0.75em; margin-left: 0.2rem; }
+  .schedule-form { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 0.75rem 1rem; align-items: end; margin-bottom: 1.5rem; }
+  .schedule-form label { display: block; font-size: 0.85rem; font-weight: 600; margin-bottom: 0.25rem; }
+  .schedule-form select, .schedule-form input { width: 100%; box-sizing: border-box; }
+  /* Cung chieu cao + chu can giua cho moi o tren MOI trinh duyet: <select> ve theo kieu
+     goc cua he dieu hanh (Chrome Windows/Safari bo qua padding/height -> chu bi tut xuong,
+     moi o lech 1 kieu) nen tat appearance, tu ve mui ten, va can chu bang line-height (=
+     chieu cao - 2px vien) thay vi padding tren/duoi. CHI ap dung trong form Schedule. */
+  .schedule-form select, .schedule-form input[type="text"], .schedule-form input[type="number"] {
+    height: 38px; line-height: 36px; padding-top: 0; padding-bottom: 0;
+  }
+  .schedule-form select {
+    -webkit-appearance: none; -moz-appearance: none; appearance: none;
+    padding-right: 2rem; cursor: pointer;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: right 0.65rem center; background-size: 14px;
+  }
+  .schedule-form [hidden] { display: none !important; }
+  .schedule-edit-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; }
+  .schedule-edit-btn svg { width: 15px; height: 15px; }
+  /* Nut Tam dung/Bat lai dang icon (cung co nut but chi): hien ⏸ khi lich dang chay, ▶
+     (mau xanh ngoc, class "run") khi dang tam dung - JS polling doi class theo trang thai. */
+  .sch-active-btn .ic-play { display: none; }
+  .sch-active-btn.run .ic-pause { display: none; }
+  .sch-active-btn.run .ic-play { display: inline; }
+  /* Khung chon NHIEU app (nhom theo project) - full chieu ngang form. */
+  .sch-apps-field { grid-column: 1 / -1; }
+  .sch-apps-box { border: 1px solid #d1d5db; border-radius: 8px; background: #fff; }
+  .sch-apps-box .sch-apps-search { border: none; border-bottom: 1px solid #e5e7eb; border-radius: 8px 8px 0 0; }
+  .sch-apps-box .sch-apps-search:focus { box-shadow: none; }
+  .sch-apps-list { max-height: 240px; overflow-y: auto; padding: 0.35rem 0.5rem; }
+  .sch-apps-list label { display: flex; align-items: center; gap: 0.5rem; margin: 0; padding: 0.3rem 0.35rem; border-radius: 6px; font-weight: 400; font-size: 0.9rem; cursor: pointer; }
+  .sch-apps-list label:hover { background: #f1f5f9; }
+  .sch-apps-list .sch-proj { font-weight: 700; }
+  .sch-apps-list .sch-proj .count { color: #9ca3af; font-weight: 500; font-size: 0.8rem; }
+  .sch-apps-list .sch-app { padding-left: 1.85rem; }
+  .sch-apps-list input[type="checkbox"] { width: 16px; height: 16px; flex: none; }
+  /* Project chon 1 phan app: dau "-" (base.html chi tu ve trang thai :checked). */
+  .sch-apps-list input[type="checkbox"]:indeterminate {
+    background-color: #3699FF; border-color: #3699FF;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3.5' stroke-linecap='round'%3E%3Cline x1='6' y1='12' x2='18' y2='12'/%3E%3C/svg%3E");
+    background-repeat: no-repeat; background-position: center; background-size: 11px 11px;
+  }
+  .sch-apps-empty { color: #9ca3af; font-size: 0.85rem; padding: 0.5rem; }
+  .sch-apps-chips { display: flex; flex-wrap: wrap; gap: 0.35rem; margin-top: 0.5rem; }
+  .sch-apps-chips .chip { display: inline-flex; align-items: center; gap: 0.3rem; padding: 0.15rem 0.3rem 0.15rem 0.6rem; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-size: 0.8rem; font-weight: 600; }
+  .sch-apps-chips .chip button { border: none; background: none; color: #1d4ed8; padding: 0 0.2rem; cursor: pointer; font-size: 0.9rem; line-height: 1; }
+  .sch-apps-count { font-weight: 500; color: #3699FF; }
+  .sch-apps-clear { border: none; background: none; color: #6b7280; font-size: 0.8rem; padding: 0; margin-left: 0.5rem; cursor: pointer; text-decoration: underline; }
+  .sch-bulk-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; margin-bottom: 0.75rem; }
+  .sch-bulk-bar .count { font-size: 0.85rem; color: #555; margin-right: 0.25rem; }
+  th.sch-select-col, td.sch-select-col { width: 1%; }
+  .sch-bulk-note { grid-column: 1 / -1; font-size: 0.85rem; color: #1d4ed8; background: #dbeafe; border-radius: 8px; padding: 0.5rem 0.75rem; }
+  #schedule-form.editing { padding: 0.75rem; border-radius: 10px; background: #eff6ff; box-shadow: inset 0 0 0 1.5px #3699FF; }
+</style>
+
+<div class="card">
+  <h2 style="margin-top:0;">Schedule</h2>
+  <div class="schedule-tabs">
+    {% if 'restart' in visible_tabs %}<a href="/schedule?tab=restart" class="{{ 'active' if tab == 'restart' }}">Tự động restart</a>{% endif %}
+    {% if 'toggle' in visible_tabs %}<a href="/schedule?tab=toggle" class="{{ 'active' if tab == 'toggle' }}">Tự động tắt/bật app</a>{% endif %}
+  </div>
+
+  {% if create_envs %}
+  <form method="post" action="/schedule/create" class="schedule-form" id="schedule-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+    <div class="sch-bulk-note" id="sch-bulk-note" hidden></div>
+    {% if tab == 'restart' %}
+    <input type="hidden" name="action" id="sch-action" value="restart">
+    {% else %}
+    <div>
+      <label>Hành động *</label>
+      <select name="action" id="sch-action" required>
+        <option value="stop">{{ actions['stop'] }}</option>
+        <option value="start">{{ actions['start'] }}</option>
+      </select>
+    </div>
+    {% endif %}
+    <div id="sch-env-field">
+      <label>Môi trường *</label>
+      <select name="env" id="sch-env" required>
+        {% for env in create_envs %}<option value="{{ env }}">{{ env|capitalize }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label>Tần suất *</label>
+      <select name="frequency" id="sch-frequency" required>
+        {% for key, label in frequencies.items() %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div id="sch-weekday-wrap" hidden>
+      <label>Thứ *</label>
+      <select name="weekday" id="sch-weekday">
+        {% for label in weekdays %}<option value="{{ loop.index0 }}">{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div id="sch-dom-wrap" hidden>
+      <label>Ngày trong tháng *</label>
+      <input type="number" name="day_of_month" id="sch-dom" min="1" max="31" value="1" title="Tháng không đủ ngày sẽ chạy ngày cuối tháng">
+    </div>
+    <div id="sch-time-wrap">
+      <label>Giờ chạy (GMT+7, 24h) *</label>
+      <input type="text" name="time_of_day" id="sch-time" placeholder="HH:MM"
+        inputmode="numeric" autocomplete="off" pattern="([01][0-9]|2[0-3]):[0-5][0-9]" title="Giờ dạng 24h, ví dụ 22:30">
+    </div>
+    <div id="sch-once-wrap" hidden>
+      <label>Ngày giờ chạy (GMT+7) *</label>
+      <input type="text" id="sch-once" placeholder="dd/mm/yyyy hh:mm" pattern="\d{2}/\d{2}/\d{4} \d{2}:\d{2}" autocomplete="off">
+      <input type="hidden" name="run_once_at" id="sch-once-iso">
+    </div>
+    <div class="sch-apps-field">
+      <label>Application * <span class="sch-apps-count" id="sch-apps-count"></span>
+        <button type="button" class="sch-apps-clear" id="sch-apps-clear" hidden>Bỏ chọn tất cả</button></label>
+      <div class="sch-apps-box">
+        <input type="text" class="sch-apps-search" id="sch-apps-search" placeholder="Lọc theo project hoặc application..." autocomplete="off">
+        <div class="sch-apps-list" id="sch-apps-list"></div>
+      </div>
+      <div class="sch-apps-chips" id="sch-apps-chips"></div>
+    </div>
+    <div style="display:flex; gap:0.5rem;">
+      <button type="submit" class="run" id="sch-submit">Tạo lịch</button>
+      <button type="button" id="sch-cancel-edit" hidden>Hủy</button>
+    </div>
+  </form>
+  {% endif %}
+
+  {% if schedules %}
+  <div style="display:flex; flex-wrap:wrap; gap:0.75rem; align-items:center; margin-bottom:1rem;">
+    <div style="position:relative; max-width:320px; flex:1 1 240px;">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+        style="position:absolute; left:0.6rem; top:50%; transform:translateY(-50%); width:15px; height:15px; stroke:#9ca3af; pointer-events:none;">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <input type="text" id="schedule-filter" placeholder="Lọc theo Project hoặc Application..."
+        style="width:100%; box-sizing:border-box; padding:0.45rem 0.6rem 0.45rem 2.1rem;">
+    </div>
+    <select id="schedule-env-filter" style="max-width:180px;">
+      <option value="">Tất cả môi trường</option>
+      <option value="production">Production</option>
+      <option value="staging">Staging</option>
+    </select>
+  </div>
+  {% endif %}
+
+  {% set can_bulk = schedules | selectattr('can_manage') | list | length > 0 %}
+  {% if can_bulk %}
+  <!-- Thao tac hang loat tren cac lich da tich chon - JS (xem cuoi file) tu sinh input
+  "ids" truoc khi submit. Nut bi khoa khi chua chon lich nao. -->
+  <form id="sch-bulk-form" class="sch-bulk-bar" method="post" action="/schedule/bulk">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <span class="count" id="sch-bulk-count">Đã chọn 0 lịch</span>
+    <button type="button" id="sch-bulk-edit" class="schedule-edit-btn sch-bulk-btn" title="Sửa các lịch đã chọn" aria-label="Sửa các lịch đã chọn" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/>
+      </svg>
+    </button>
+    <button type="submit" name="op" value="pause" class="schedule-edit-btn sch-bulk-btn" title="Tạm dừng các lịch đã chọn" aria-label="Tạm dừng các lịch đã chọn" disabled>
+      <svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+    </button>
+    <button type="submit" name="op" value="resume" class="schedule-edit-btn sch-bulk-btn run" title="Bật lại các lịch đã chọn" aria-label="Bật lại các lịch đã chọn" disabled>
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 001.5.86l10.5-6.5a1 1 0 000-1.72L9.5 4.64A1 1 0 008 5.5z"/></svg>
+    </button>
+    <button type="submit" name="op" value="delete" class="schedule-edit-btn sch-bulk-btn danger" title="Xoá các lịch đã chọn" aria-label="Xoá các lịch đã chọn" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 6h18"/><path d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/>
+      </svg>
+    </button>
+  </form>
+  {% endif %}
+
+  <table class="responsive-table">
+    <thead>
+      <tr>
+        {% if can_bulk %}<th class="sch-select-col"><input type="checkbox" id="sch-select-all" title="Chọn tất cả lịch đang hiện" aria-label="Chọn tất cả"></th>{% endif %}
+        <th class="sortable" data-sort-key="env">Môi trường<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="app">Project / Application<span class="sort-arrow"></span></th>
+        {% if tab == 'toggle' %}<th class="sortable" data-sort-key="action">Hành động<span class="sort-arrow"></span></th>{% endif %}
+        <th>Lịch</th>
+        <th class="sortable" data-sort-key="next">Lần chạy tới<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="last">Lần chạy gần nhất<span class="sort-arrow"></span></th>
+        <th class="sortable" data-sort-key="creator">Người tạo<span class="sort-arrow"></span></th>
+        <th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in schedules %}
+      {% set s = item.s %}
+      <tr data-schedule-id="{{ s.id }}" data-env="{{ s.env }}" data-project="{{ s.project }}" data-app="{{ s.application }}"
+        data-index="{{ loop.index0 }}" data-action="{{ s.action }}" data-creator="{{ s.created_by_email }}"
+        data-next="{{ (s.next_run_at | gmt7).strftime('%Y%m%d%H%M') if s.is_active and s.next_run_at else '' }}"
+        data-last="{{ (s.last_run_at | gmt7).strftime('%Y%m%d%H%M') if s.last_run_at else '' }}">
+        {% if can_bulk %}
+        <td class="sch-select-col">{% if item.can_manage %}<input type="checkbox" class="sch-select" value="{{ s.id }}" aria-label="Chọn lịch {{ s.project }}/{{ s.application }}">{% endif %}</td>
+        {% endif %}
+        <td data-label="Môi trường">{{ s.env|capitalize }}</td>
+        <td data-label="Project / Application">{{ s.project }}/{{ s.application }}</td>
+        {% if tab == 'toggle' %}
+        <td data-label="Hành động">
+          <span class="badge" style="background:{{ '#F64E60' if s.action == 'stop' else '#1BC5BD' }};">{{ actions[s.action] }}</span>
+        </td>
+        {% endif %}
+        <td data-label="Lịch">{{ item.describe }}</td>
+        <td data-label="Lần chạy tới" class="sch-next-cell">
+          {% if s.is_active %}{{ (s.next_run_at | gmt7 | dmy) or '-' }}
+          {% elif item.finished %}<span class="badge" style="background:#94A3B8;" title="Lịch 1 lần đã chạy xong - bấm ✎ để đặt ngày giờ mới">Đã chạy xong</span>
+          {% else %}<span class="badge" style="background:#6B7280;">Tạm dừng</span>{% endif %}
+        </td>
+        <td data-label="Lần chạy gần nhất" class="sch-last-cell">
+          {% if s.last_run_at %}
+          {% if s.last_skipped %}
+          <span class="badge" style="background:#9CA3AF; cursor:help;" title="{{ s.last_message }}">Bỏ qua</span>
+          {% else %}
+          <span class="badge" style="background:{{ '#1BC5BD' if s.last_ok else '#F64E60' }};">{{ 'OK' if s.last_ok else 'Lỗi' }}</span>
+          {% endif %}
+          {{ s.last_run_at | gmt7 | dmy }}
+          {% else %}-{% endif %}
+        </td>
+        <td data-label="Người tạo">{{ s.created_by_email }}</td>
+        <td>
+          {% if item.can_manage %}
+          <div style="display:flex; gap:0.4rem;">
+            <button type="button" class="schedule-edit-btn sch-row-edit" title="Sửa lịch" aria-label="Sửa lịch"
+              data-id="{{ s.id }}" data-action="{{ s.action }}" data-env="{{ s.env }}"
+              data-project="{{ s.project }}" data-app="{{ s.application }}" data-frequency="{{ s.frequency }}"
+              data-time="{{ s.time_of_day or '' }}" data-weekday="{{ s.weekday if s.weekday is not none else '' }}"
+              data-dom="{{ s.day_of_month or '' }}" data-once="{{ (s.run_once_at | gmt7 | dmy) or '' }}">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/>
+              </svg>
+            </button>
+            <form method="post" action="/schedule/{{ s.id }}/active" class="sch-active-form"{% if item.finished %} hidden{% endif %}>
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+              <input type="hidden" name="tab" value="{{ tab }}">
+              <input type="hidden" name="active" class="sch-active-input" value="{{ '0' if s.is_active else '1' }}">
+              <button type="submit" class="schedule-edit-btn sch-active-btn{{ '' if s.is_active else ' run' }}"
+                title="{{ 'Tạm dừng' if s.is_active else 'Bật lại' }}" aria-label="{{ 'Tạm dừng' if s.is_active else 'Bật lại' }}">
+                <svg class="ic-pause" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="5" width="4" height="14" rx="1"/><rect x="14" y="5" width="4" height="14" rx="1"/></svg>
+                <svg class="ic-play" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5.5v13a1 1 0 001.5.86l10.5-6.5a1 1 0 000-1.72L9.5 4.64A1 1 0 008 5.5z"/></svg>
+              </button>
+            </form>
+            <form method="post" action="/schedule/{{ s.id }}/delete" onsubmit="return confirm('Xoá lịch này?');">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token(request) }}">
+              <input type="hidden" name="tab" value="{{ tab }}">
+              <button type="submit" class="schedule-edit-btn danger" title="Xoá lịch" aria-label="Xoá lịch">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M3 6h18"/><path d="M8 6V4a1 1 0 011-1h6a1 1 0 011 1v2"/><path d="M19 6l-1 14a2 2 0 01-2 2H8a2 2 0 01-2-2L5 6"/><path d="M10 11v6M14 11v6"/>
+                </svg>
+              </button>
+            </form>
+          </div>
+          {% endif %}
+        </td>
+      </tr>
+      {% else %}
+      <tr><td colspan="9">Chưa có lịch nào</td></tr>
+      {% endfor %}
+      <tr id="schedule-filter-empty" style="display:none;"><td colspan="9">Không có lịch nào khớp bộ lọc</td></tr>
+    </tbody>
+  </table>
+  <div id="schedule-pagination" class="pagination" style="display:none;">
+    <button type="button" id="schedule-page-prev" class="page-btn" aria-label="Trang trước">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M15 18l-6-6 6-6"/></svg>
+    </button>
+    <div id="schedule-page-numbers" style="display:contents;"></div>
+    <button type="button" id="schedule-page-next" class="page-btn" aria-label="Trang sau">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M9 18l6-6-6-6"/></svg>
+    </button>
+    <div style="margin-left:auto; display:flex; align-items:center; gap:0.4rem; font-size:0.85rem; color:#4b5563;">
+      <label for="schedule-page-size">Rows per page</label>
+      <select id="schedule-page-size">
+        <option value="50" selected>50</option>
+        <option value="100">100</option>
+        <option value="200">200</option>
+        <option value="300">300</option>
+        <option value="500">500</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+{% if create_envs %}
+<script>
+  (function () {
+    const appsData = {{ apps_data | tojson }};
+    const envSel = document.getElementById('sch-env');
+    const freqSel = document.getElementById('sch-frequency');
+    const onceInput = document.getElementById('sch-once');
+    const onceIso = document.getElementById('sch-once-iso');
+    const timeInput = document.getElementById('sch-time');
+    const appsSearch = document.getElementById('sch-apps-search');
+    const appsList = document.getElementById('sch-apps-list');
+    const appsChips = document.getElementById('sch-apps-chips');
+    const appsCount = document.getElementById('sch-apps-count');
+    const appsClear = document.getElementById('sch-apps-clear');
+
+    function projectsOf(env) { return Object.keys(appsData[env] || {}); }
+    function appsOf(env, project) { return (appsData[env] || {})[project] || []; }
+    const key = (project, app) => project + '|' + app;
+
+    // Chon NHIEU app (co the thuoc nhieu project) - moi app tao 1 lich rieng cung thiet lap.
+    // selected giu qua cac lan loc; doi moi truong thi xoa. Che do SUA lich: chi 1 app (tick
+    // app khac se thay the), khong co o "chon ca project".
+    const selected = new Set();
+    let singleMode = false;
+
+    function el(tag, cls, text) {
+      const node = document.createElement(tag);
+      if (cls) node.className = cls;
+      if (text !== undefined) node.textContent = text; // ten tu git - khong chen HTML
+      return node;
+    }
+
+    function renderApps() {
+      const env = envSel.value;
+      const q = appsSearch.value.trim().toLowerCase();
+      const nodes = [];
+      projectsOf(env).forEach((project) => {
+        const all = appsOf(env, project);
+        const projectHit = project.toLowerCase().includes(q);
+        const shown = projectHit ? all : all.filter((a) => a.toLowerCase().includes(q));
+        if (!shown.length) return;
+
+        const projLabel = el('label', 'sch-proj');
+        const projCb = el('input');
+        projCb.type = 'checkbox';
+        const picked = all.filter((a) => selected.has(key(project, a))).length;
+        projCb.checked = picked === all.length;
+        projCb.indeterminate = picked > 0 && picked < all.length;
+        projCb.disabled = singleMode;
+        projCb.addEventListener('change', () => {
+          shown.forEach((a) => (projCb.checked ? selected.add(key(project, a)) : selected.delete(key(project, a))));
+          renderApps();
+        });
+        projLabel.append(projCb, el('span', '', project), el('span', 'count', `(${all.length})`));
+        nodes.push(projLabel);
+
+        shown.forEach((app) => {
+          const label = el('label', 'sch-app');
+          const cb = el('input');
+          cb.type = 'checkbox';
+          cb.checked = selected.has(key(project, app));
+          cb.addEventListener('change', () => {
+            if (cb.checked) {
+              if (singleMode) selected.clear();
+              selected.add(key(project, app));
+            } else {
+              selected.delete(key(project, app));
+            }
+            renderApps();
+          });
+          label.append(cb, el('span', '', app));
+          nodes.push(label);
+        });
+      });
+      if (!nodes.length) nodes.push(el('div', 'sch-apps-empty', q ? 'Không có application nào khớp bộ lọc' : 'Môi trường này chưa có application'));
+      appsList.replaceChildren(...nodes);
+      renderChips();
+    }
+
+    function renderChips() {
+      const chips = Array.from(selected).map((k) => {
+        const [project, app] = k.split('|');
+        const chip = el('span', 'chip', project + '/' + app);
+        const remove = el('button', '', '×');
+        remove.type = 'button';
+        remove.title = 'Bỏ chọn';
+        remove.addEventListener('click', () => { selected.delete(k); renderApps(); });
+        chip.appendChild(remove);
+        return chip;
+      });
+      appsChips.replaceChildren(...chips);
+      appsCount.textContent = selected.size ? `(đã chọn ${selected.size})` : '';
+      appsClear.hidden = selected.size === 0 || singleMode;
+    }
+
+    function onEnv() {
+      selected.clear();
+      appsSearch.value = '';
+      renderApps();
+    }
+    appsSearch.addEventListener('input', renderApps);
+    appsClear.addEventListener('click', () => { selected.clear(); renderApps(); });
+    // O gio dang text 24h (thay <input type="time"> - trinh duyet tu hien AM/PM theo
+    // locale he dieu hanh, khong tat duoc): go so tu chen ":" (2230 -> 22:30), roi o thi
+    // tu bu so 0 (9 -> 09:00, 930 -> 09:30).
+    function setTime(value) { timeInput.value = value || ''; }
+    function normalizeTime(text) {
+      const d = (text || '').replace(/\D/g, '').slice(0, 4);
+      if (!d) return '';
+      let h;
+      let m;
+      if (d.length <= 2) { h = d; m = '00'; } else if (d.length === 3) { h = d[0]; m = d.slice(1); } else { h = d.slice(0, 2); m = d.slice(2); }
+      h = h.padStart(2, '0');
+      return Number(h) <= 23 && Number(m) <= 59 ? h + ':' + m : text;
+    }
+    // Khi GO THEM: dinh dang lai (chen ":") nhung GIU vi tri con tro theo so chu so dung
+    // truoc no (gan lai .value lam con tro nhay ve cuoi o). Khi XOA: de nguyen cho nguoi
+    // dung sua tiep, roi o (blur) moi chuan hoa.
+    timeInput.addEventListener('input', (e) => {
+      if (e.inputType && e.inputType.startsWith('delete')) return;
+      const caret = timeInput.selectionStart;
+      let digitsBefore = timeInput.value.slice(0, caret).replace(/\D/g, '').length;
+      let d = timeInput.value.replace(/\D/g, '');
+      if (/^[3-9]$/.test(d)) { d = '0' + d; digitsBefore += 1; } // go 9 -> 09 (gio 1 chu so)
+      d = d.slice(0, 4);
+      digitsBefore = Math.min(digitsBefore, d.length);
+      timeInput.value = d.length > 2 ? d.slice(0, 2) + ':' + d.slice(2) : d;
+      const pos = digitsBefore > 2 ? digitsBefore + 1 : digitsBefore;
+      timeInput.setSelectionRange(pos, pos);
+    });
+    // Bam vao o thi boi den het - go la thay gio cu (khi sua lich), khong chen vao giua.
+    timeInput.addEventListener('focus', () => setTimeout(() => timeInput.select(), 0));
+    timeInput.addEventListener('blur', () => { timeInput.value = normalizeTime(timeInput.value); });
+    function onFreq() {
+      const f = freqSel.value;
+      document.getElementById('sch-weekday-wrap').hidden = f !== 'weekly';
+      document.getElementById('sch-dom-wrap').hidden = f !== 'monthly';
+      document.getElementById('sch-time-wrap').hidden = f === 'once';
+      document.getElementById('sch-once-wrap').hidden = f !== 'once';
+      timeInput.required = f !== 'once';
+      timeInput.disabled = f === 'once';
+      onceInput.required = f === 'once';
+    }
+    envSel.addEventListener('change', onEnv);
+    freqSel.addEventListener('change', onFreq);
+    window.initDmyPicker(onceInput);
+    onEnv();
+    onFreq();
+    setTime('');
+
+    // Nut but chi tren dong: do du lieu lich vao CHINH form tao o tren, doi action sang
+    // /schedule/{id}/edit. Nut but chi tren thanh hang loat: sua N lich da tich (chi doi hanh
+    // dong/tan suat/gio, an Moi truong + Application vi moi lich giu nguyen cua no) ->
+    // /schedule/bulk-edit. "Huy" tra form ve che do tao moi.
+    const form = document.getElementById('schedule-form');
+    const submitBtn = document.getElementById('sch-submit');
+    const cancelBtn = document.getElementById('sch-cancel-edit');
+    const actionInput = document.getElementById('sch-action');
+    const envField = document.getElementById('sch-env-field');
+    const appsField = document.querySelector('.sch-apps-field');
+    const bulkNote = document.getElementById('sch-bulk-note');
+    let bulkIds = [];
+
+    function fillSchedule(d) {
+      actionInput.value = d.action;
+      freqSel.value = d.frequency;
+      onFreq();
+      setTime(d.time);
+      if (d.weekday !== '') document.getElementById('sch-weekday').value = d.weekday;
+      if (d.dom) document.getElementById('sch-dom').value = d.dom;
+      onceInput.value = d.once;
+    }
+    function showEditing(actionUrl) {
+      form.action = actionUrl;
+      form.classList.add('editing');
+      submitBtn.textContent = 'Lưu';
+      cancelBtn.hidden = false;
+      form.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }
+    function setBulkMode(ids) {
+      bulkIds = ids;
+      envField.hidden = ids.length > 0;
+      appsField.hidden = ids.length > 0;
+      bulkNote.hidden = ids.length === 0;
+    }
+
+    document.querySelectorAll('.sch-row-edit').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const d = btn.dataset;
+        setBulkMode([]);
+        envSel.value = d.env;
+        singleMode = true;
+        onEnv();
+        selected.add(key(d.project, d.app));
+        renderApps();
+        fillSchedule(d);
+        showEditing('/schedule/' + d.id + '/edit');
+      });
+    });
+    // Goi tu script danh sach (thanh hang loat) - d = data cua nut sua dong DAU TIEN da tich.
+    window.scheduleStartBulkEdit = (ids, d) => {
+      singleMode = false;
+      setBulkMode(ids);
+      fillSchedule(d);
+      bulkNote.textContent = `Đang sửa ${ids.length} lịch đã chọn: chỉ đổi `
+        + (actionInput.tagName === 'SELECT' ? 'hành động, ' : '')
+        + 'tần suất và giờ chạy. Môi trường và application của từng lịch giữ nguyên.';
+      showEditing('/schedule/bulk-edit');
+    };
+    cancelBtn.addEventListener('click', () => {
+      form.reset();
+      form.action = '/schedule/create';
+      form.classList.remove('editing');
+      submitBtn.textContent = 'Tạo lịch';
+      cancelBtn.hidden = true;
+      singleMode = false;
+      setBulkMode([]);
+      onEnv();
+      onFreq();
+      setTime('');
+    });
+
+    document.getElementById('schedule-form').addEventListener('submit', (e) => {
+      form.querySelectorAll('.sch-apps-hidden').forEach((n) => n.remove());
+      if (!bulkIds.length && !selected.size) {
+        e.preventDefault();
+        alert('Vui lòng chọn ít nhất 1 application.');
+        appsSearch.focus();
+        return;
+      }
+      // Tao: gui moi app 1 input "apps" (project|application). Sua: gui project/application
+      // cua DUNG 1 app dang chon.
+      const addHidden = (name, value) => {
+        const input = el('input', 'sch-apps-hidden');
+        input.type = 'hidden';
+        input.name = name;
+        input.value = value;
+        form.appendChild(input);
+      };
+      if (bulkIds.length) {
+        bulkIds.forEach((id) => addHidden('ids', id));
+      } else if (singleMode) {
+        const [project, app] = Array.from(selected)[0].split('|');
+        addHidden('project', project);
+        addHidden('application', app);
+      } else {
+        selected.forEach((k) => addHidden('apps', k));
+      }
+      if (freqSel.value !== 'once') {
+        timeInput.value = normalizeTime(timeInput.value);
+        if (!/^([01][0-9]|2[0-3]):[0-5][0-9]$/.test(timeInput.value)) {
+          e.preventDefault();
+          alert('Giờ chạy không hợp lệ. Nhập dạng 24h HH:MM (ví dụ 22:30).');
+          timeInput.focus();
+          return;
+        }
+      }
+      if (freqSel.value === 'once') {
+        const iso = window.parseDmyDatetime(onceInput.value);
+        if (!iso) {
+          e.preventDefault();
+          alert('Ngày giờ chạy không hợp lệ. Định dạng dd/mm/yyyy hh:mm (ví dụ 29/10/2026 22:00).');
+          onceInput.focus();
+          return;
+        }
+        onceIso.value = iso;
+      }
+    });
+  })();
+</script>
+{% endif %}
+
+{% if schedules %}
+<script>
+  // Loc (Project/Application + Moi truong) va phan trang client-side - GIONG staging.html
+  // (cung buildPageItems, cung lua chon 50/100/200/300/500, luu filter/trang/page size vao
+  // sessionStorage de khong mat sau khi luu/xoa lich - trang reload sau moi thao tac). Key
+  // storage tach theo tab (restart/toggle). Loc tren TOAN BO danh sach roi moi phan trang.
+  (function () {
+    const tab = {{ tab | tojson }};
+    const FILTER_STORAGE_KEY = 'schedule-' + tab + '-filter-value';
+    const ENV_STORAGE_KEY = 'schedule-' + tab + '-env-value';
+    const PAGE_SIZE_STORAGE_KEY = 'schedule-' + tab + '-page-size-value';
+    const PAGE_STORAGE_KEY = 'schedule-' + tab + '-page-value';
+    const filterInput = document.getElementById('schedule-filter');
+    const envFilter = document.getElementById('schedule-env-filter');
+    const filterEmptyRow = document.getElementById('schedule-filter-empty');
+    const pageSizeSelect = document.getElementById('schedule-page-size');
+    const paginationEl = document.getElementById('schedule-pagination');
+    const pageNumbersEl = document.getElementById('schedule-page-numbers');
+    const pagePrevBtn = document.getElementById('schedule-page-prev');
+    const pageNextBtn = document.getElementById('schedule-page-next');
+
+    function storageGet(key) {
+      try { return sessionStorage.getItem(key); } catch (e) { return null; }
+    }
+    function storageSet(key, value) {
+      try { sessionStorage.setItem(key, value); } catch (e) { /* bo qua */ }
+    }
+
+    const savedPage = parseInt(storageGet(PAGE_STORAGE_KEY), 10);
+    let currentPage = savedPage >= 1 ? savedPage : 1;
+
+    function filterableRows() {
+      return Array.from(document.querySelectorAll('tbody tr[data-schedule-id]'));
+    }
+    function matchedRows() {
+      const q = filterInput.value.trim().toLowerCase();
+      const env = envFilter.value;
+      return filterableRows().filter((row) => {
+        const hay = (row.dataset.project + ' ' + row.dataset.app).toLowerCase();
+        return (!q || hay.includes(q)) && (!env || row.dataset.env === env);
+      });
+    }
+
+    // Port 1:1 tu staging.html (ban goc: _build_page_items() trong tasks_router.py).
+    function buildPageItems(page, totalPages) {
+      if (totalPages <= 7) {
+        const items = [];
+        for (let i = 1; i <= totalPages; i += 1) items.push(i);
+        return items;
+      }
+      let windowStart = page - 1;
+      let windowEnd = page + 1;
+      if (windowStart < 2) {
+        const shift = 2 - windowStart;
+        windowStart += shift;
+        windowEnd += shift;
+      }
+      if (windowEnd > totalPages - 1) {
+        const shift = windowEnd - (totalPages - 1);
+        windowEnd -= shift;
+        windowStart -= shift;
+      }
+      windowStart = Math.max(windowStart, 2);
+      windowEnd = Math.min(windowEnd, totalPages - 1);
+
+      const items = [1];
+      if (windowStart - 1 > 1) items.push(null);
+      for (let i = windowStart; i <= windowEnd; i += 1) items.push(i);
+      if (totalPages - windowEnd > 1) items.push(null);
+      items.push(totalPages);
+      return items;
+    }
+
+    function renderPagination(totalPages) {
+      if (totalPages <= 1) {
+        paginationEl.style.display = 'none';
+        return;
+      }
+      paginationEl.style.display = 'flex';
+      pagePrevBtn.classList.toggle('disabled', currentPage <= 1);
+      pageNextBtn.classList.toggle('disabled', currentPage >= totalPages);
+      pageNumbersEl.innerHTML = buildPageItems(currentPage, totalPages).map((p) => {
+        if (p === null) return '<span class="page-ellipsis">…</span>';
+        const activeClass = p === currentPage ? ' active' : '';
+        return `<button type="button" class="page-btn${activeClass}" data-page="${p}">${p}</button>`;
+      }).join('');
+    }
+
+    function render() {
+      const rows = filterableRows();
+      const matched = matchedRows();
+      const pageSize = parseInt(pageSizeSelect.value, 10) || 50;
+      const totalPages = Math.max(1, Math.ceil(matched.length / pageSize));
+      if (currentPage > totalPages) currentPage = totalPages;
+      if (currentPage < 1) currentPage = 1;
+      storageSet(PAGE_STORAGE_KEY, String(currentPage));
+      const start = (currentPage - 1) * pageSize;
+      const pageSet = new Set(matched.slice(start, start + pageSize));
+      rows.forEach((row) => {
+        row.style.display = pageSet.has(row) ? '' : 'none';
+      });
+      filterEmptyRow.style.display = rows.length > 0 && matched.length === 0 ? '' : 'none';
+      renderPagination(totalPages);
+    }
+
+    const savedPageSize = storageGet(PAGE_SIZE_STORAGE_KEY);
+    if (savedPageSize && ['50', '100', '200', '300', '500'].includes(savedPageSize)) {
+      pageSizeSelect.value = savedPageSize;
+    }
+    pageSizeSelect.addEventListener('change', () => {
+      storageSet(PAGE_SIZE_STORAGE_KEY, pageSizeSelect.value);
+      currentPage = 1;
+      render();
+    });
+    pagePrevBtn.addEventListener('click', () => {
+      if (pagePrevBtn.classList.contains('disabled')) return;
+      currentPage -= 1;
+      render();
+    });
+    pageNextBtn.addEventListener('click', () => {
+      if (pageNextBtn.classList.contains('disabled')) return;
+      currentPage += 1;
+      render();
+    });
+    pageNumbersEl.addEventListener('click', (e) => {
+      const btn = e.target.closest('.page-btn');
+      if (!btn || !btn.dataset.page) return;
+      currentPage = parseInt(btn.dataset.page, 10);
+      render();
+    });
+
+    filterInput.value = storageGet(FILTER_STORAGE_KEY) || '';
+    const savedEnv = storageGet(ENV_STORAGE_KEY);
+    if (savedEnv === 'staging' || savedEnv === 'production') envFilter.value = savedEnv;
+    filterInput.addEventListener('input', () => {
+      storageSet(FILTER_STORAGE_KEY, filterInput.value);
+      currentPage = 1;
+      render();
+    });
+    envFilter.addEventListener('change', () => {
+      storageSet(ENV_STORAGE_KEY, envFilter.value);
+      currentPage = 1;
+      render();
+    });
+    // Sap xep theo cot: bam tieu de 1 lan tang dan, 2 lan giam dan, 3 lan ve thu tu mac
+    // dinh (data-index = thu tu server tra ve). Sap lai THU TU DOM cua cac dong roi goi
+    // render() - loc/phan trang doc dong theo thu tu DOM nen tu dung theo. Gia tri rong
+    // (lich tam dung chua co "lan chay toi", lich chua chay lan nao) luon nam CUOI ca 2
+    // chieu. data-next/data-last dang yyyymmddHHMM (so sanh chuoi = so sanh thoi gian),
+    // duoc job polling 30s cap nhat lai - nhung KHONG tu sap lai dong (tranh dong nhay cho
+    // khi dang xem), chi ap dung khi bam tieu de/tai lai trang.
+    const SORT_STORAGE_KEY = 'schedule-' + tab + '-sort-value';
+    const tbody = filterEmptyRow.parentElement;
+    const sortHeaders = Array.from(document.querySelectorAll('th.sortable'));
+    let sortKey = '';
+    let sortDir = '';
+
+    function sortValue(row, key) {
+      if (key === 'app') return (row.dataset.project + '/' + row.dataset.app).toLowerCase();
+      return (row.dataset[key] || '').toLowerCase();
+    }
+
+    function applySort() {
+      const rows = filterableRows();
+      rows.sort((a, b) => {
+        if (!sortKey) return Number(a.dataset.index) - Number(b.dataset.index);
+        const va = sortValue(a, sortKey);
+        const vb = sortValue(b, sortKey);
+        if (!va && vb) return 1;
+        if (va && !vb) return -1;
+        const cmp = va.localeCompare(vb, 'vi');
+        if (cmp !== 0) return sortDir === 'desc' ? -cmp : cmp;
+        return Number(a.dataset.index) - Number(b.dataset.index);
+      });
+      rows.forEach((row) => tbody.insertBefore(row, filterEmptyRow));
+      sortHeaders.forEach((th) => {
+        th.querySelector('.sort-arrow').textContent =
+          th.dataset.sortKey === sortKey ? (sortDir === 'desc' ? '▼' : '▲') : '';
+      });
+    }
+
+    sortHeaders.forEach((th) => {
+      th.addEventListener('click', () => {
+        if (sortKey !== th.dataset.sortKey) {
+          sortKey = th.dataset.sortKey;
+          sortDir = 'asc';
+        } else if (sortDir === 'asc') {
+          sortDir = 'desc';
+        } else {
+          sortKey = '';
+          sortDir = '';
+        }
+        storageSet(SORT_STORAGE_KEY, sortKey ? sortKey + ':' + sortDir : '');
+        applySort();
+        currentPage = 1;
+        render();
+      });
+    });
+
+    const savedSort = (storageGet(SORT_STORAGE_KEY) || '').split(':');
+    if (sortHeaders.some((th) => th.dataset.sortKey === savedSort[0]) && ['asc', 'desc'].includes(savedSort[1])) {
+      sortKey = savedSort[0];
+      sortDir = savedSort[1];
+    }
+    // Tich chon nhieu lich -> Tam dung / Bat lai / Xoa hang loat. "Chon tat ca" chi chon
+    // cac dong DANG HIEN (theo loc + trang hien tai); dong da chon roi bi an van giu chon
+    // (dem trong "Da chon N lich"), giong trang Staging.
+    const bulkForm = document.getElementById('sch-bulk-form');
+    if (bulkForm) {
+      const selectAll = document.getElementById('sch-select-all');
+      const bulkCount = document.getElementById('sch-bulk-count');
+      const bulkButtons = Array.from(bulkForm.querySelectorAll('.sch-bulk-btn'));
+      const rowBoxes = () => Array.from(document.querySelectorAll('.sch-select'));
+      const visibleBoxes = () => rowBoxes().filter((cb) => cb.closest('tr').style.display !== 'none');
+
+      const refreshBulk = () => {
+        const n = rowBoxes().filter((cb) => cb.checked).length;
+        bulkCount.textContent = `Đã chọn ${n} lịch`;
+        bulkButtons.forEach((btn) => { btn.disabled = n === 0; });
+        const vis = visibleBoxes();
+        const picked = vis.filter((cb) => cb.checked).length;
+        selectAll.checked = vis.length > 0 && picked === vis.length;
+        selectAll.indeterminate = picked > 0 && picked < vis.length;
+      };
+      selectAll.addEventListener('change', () => {
+        visibleBoxes().forEach((cb) => { cb.checked = selectAll.checked; });
+        refreshBulk();
+      });
+      rowBoxes().forEach((cb) => cb.addEventListener('change', refreshBulk));
+
+      // Nut but chi tren thanh hang loat -> form o tren chuyen sang sua N lich da tich (dien san
+      // thiet lap cua lich DAU TIEN da tich, theo thu tu dang hien).
+      document.getElementById('sch-bulk-edit').addEventListener('click', () => {
+        const checked = rowBoxes().filter((cb) => cb.checked);
+        if (!checked.length || !window.scheduleStartBulkEdit) return;
+        const first = checked[0].closest('tr').querySelector('.sch-row-edit');
+        window.scheduleStartBulkEdit(checked.map((cb) => cb.value), first.dataset);
+      });
+
+      let pressedOp = '';
+      bulkButtons.forEach((btn) => btn.addEventListener('click', () => { pressedOp = btn.value; }));
+      bulkForm.addEventListener('submit', (e) => {
+        const ids = rowBoxes().filter((cb) => cb.checked).map((cb) => cb.value);
+        if (!ids.length) { e.preventDefault(); return; }
+        const verb = { pause: 'tạm dừng', resume: 'bật lại', delete: 'XOÁ' }[pressedOp] || pressedOp;
+        if (!confirm(`Bạn có chắc muốn ${verb} ${ids.length} lịch đã chọn?`)) { e.preventDefault(); return; }
+        bulkForm.querySelectorAll('input[name="ids"]').forEach((n) => n.remove());
+        ids.forEach((id) => {
+          const input = document.createElement('input');
+          input.type = 'hidden';
+          input.name = 'ids';
+          input.value = id;
+          bulkForm.appendChild(input);
+        });
+      });
+
+      // Doi loc/trang/sap xep -> cap nhat lai trang thai o "chon tat ca" theo dong dang hien.
+      const baseRender = render;
+      render = () => { baseRender(); refreshBulk(); };
+      refreshBulk();
+    }
+
+    applySort();
+    render();
+  })();
+
+  // Tu cap nhat cot "Lan chay toi"/"Lan chay gan nhat" (+ nut Tam dung/Bat lai) moi 30s
+  // tu GET /schedule/status - job chay lich moi phut nen trang khong tu biet khi lich vua
+  // chay. Chi thay noi dung o (KHONG reload) de khong mat form dang nhap/sua; tab bi an thi
+  // ngung goi, hien lai thi goi bu ngay.
+  (function () {
+    const POLL_INTERVAL_MS = 30000;
+    const tab = {{ tab | tojson }};
+
+    function badge(text, color) {
+      const span = document.createElement('span');
+      span.className = 'badge';
+      span.style.background = color;
+      span.textContent = text;
+      return span;
+    }
+
+    // "dd/mm/yyyy HH:MM" -> "yyyymmddHHMM" (cung dinh dang data-next/data-last server render).
+    function sortKey(dmy) {
+      const m = /^(\d{2})\/(\d{2})\/(\d{4}) (\d{2}):(\d{2})$/.exec(dmy || '');
+      return m ? m[3] + m[2] + m[1] + m[4] + m[5] : '';
+    }
+
+    function render(item) {
+      const row = document.querySelector('tr[data-schedule-id="' + item.id + '"]');
+      if (!row) return;
+
+      // Cap nhat khoa sap xep (yyyymmddHHMM) cho lan bam tieu de cot ke tiep.
+      row.dataset.next = item.is_active ? sortKey(item.next_run_at) : '';
+      row.dataset.last = sortKey(item.last_run_at);
+
+      const nextCell = row.querySelector('.sch-next-cell');
+      if (item.is_active) nextCell.replaceChildren(document.createTextNode(item.next_run_at || '-'));
+      else if (item.finished) nextCell.replaceChildren(Object.assign(badge('Đã chạy xong', '#94A3B8'), { title: 'Lịch 1 lần đã chạy xong - bấm ✎ để đặt ngày giờ mới' }));
+      else nextCell.replaceChildren(badge('Tạm dừng', '#6B7280'));
+      // Lich 1 lan da chay xong: an nut ▶ (khong bat lai duoc, chi sua ngay gio moi/xoa).
+      const activeForm = row.querySelector('.sch-active-form');
+      if (activeForm) activeForm.hidden = !!item.finished;
+
+      const lastCell = row.querySelector('.sch-last-cell');
+      if (item.last_run_at) {
+        lastCell.replaceChildren(
+          item.last_skipped
+            ? Object.assign(badge('Bỏ qua', '#9CA3AF'), { title: item.last_message, style: 'background:#9CA3AF; cursor:help;' })
+            : badge(item.last_ok ? 'OK' : 'Lỗi', item.last_ok ? '#1BC5BD' : '#F64E60'),
+          document.createTextNode(' ' + item.last_run_at)
+        );
+      } else {
+        lastCell.replaceChildren(document.createTextNode('-'));
+      }
+
+      const activeInput = row.querySelector('.sch-active-input');
+      const activeBtn = row.querySelector('.sch-active-btn');
+      if (activeInput && activeBtn) {
+        activeInput.value = item.is_active ? '0' : '1';
+        const label = item.is_active ? 'Tạm dừng' : 'Bật lại';
+        activeBtn.classList.toggle('run', !item.is_active);
+        activeBtn.title = label;
+        activeBtn.setAttribute('aria-label', label);
+      }
+    }
+
+    async function poll() {
+      if (document.hidden) return;
+      try {
+        const res = await fetch('/schedule/status?tab=' + encodeURIComponent(tab), { headers: { Accept: 'application/json' } });
+        if (!res.ok) return;
+        (await res.json()).forEach(render);
+      } catch (err) {
+        // Mat mang tam thoi - bo qua, lan sau goi lai.
+      }
+    }
+
+    setInterval(poll, POLL_INTERVAL_MS);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+
+    // Nut ⏸/▶ tren dong: goi nen (fetch) roi cap nhat lai tu /schedule/status - KHONG reload
+    // trang nen dong giu nguyen vi tri, giu vi tri cuon/trang/bo loc/cac o dang tich.
+    document.querySelectorAll('.sch-active-form').forEach((form) => {
+      form.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const btn = form.querySelector('button');
+        btn.disabled = true;
+        try {
+          const res = await fetch(form.action, { method: 'POST', headers: { Accept: 'application/json' }, body: new FormData(form) });
+          const data = await res.json();
+          window.showToast(data.message, data.ok);
+          if (data.ok) await poll();
+        } catch (err) {
+          form.submit(); // loi mang/JSON -> roi ve submit thuong (reload) nhu truoc
+          return;
+        } finally {
+          btn.disabled = false;
+        }
+      });
+    });
+  })();
+</script>
+{% endif %}
+{% endblock %}

@@ -15,6 +15,7 @@ from app.routers import (
     catalog_router,
     git_webhook_router,
     production_router,
+    schedule_router,
     settings_router,
     staging_router,
     sync_events_router,
@@ -22,6 +23,7 @@ from app.routers import (
     telegram_router,
     users_router,
 )
+from app.schedule_runner import shutdown_schedule_runner, start_schedule_runner
 from app.scheduler import shutdown_scheduler, start_scheduler
 from app.services import task_service
 from app.services.notify_service import send_telegram, task_summary_lines
@@ -73,7 +75,9 @@ async def lifespan(app: FastAPI):
     # app khong tu tao/sua bang khi khoi dong.
     _recover_stuck_running_tasks_on_startup()
     start_scheduler()
+    start_schedule_runner()
     yield
+    shutdown_schedule_runner()
     shutdown_scheduler()
 
 
@@ -134,3 +138,4 @@ app.include_router(git_webhook_router.router)
 app.include_router(sync_events_router.router)
 app.include_router(staging_router.router)
 app.include_router(production_router.router)
+app.include_router(schedule_router.router)

@@ -349,6 +349,7 @@ def test_toggle_production_app_merge_request_mode_pushes_with_options_not_direct
         return ""
 
     monkeypatch.setattr(git_service, "_run", _fake_run)
+    monkeypatch.setattr(git_service, "_run_with_stderr", _fake_run)  # push MR doc ca stderr (link MR)
 
     config = _replicas_config(rel_path, use_merge_request=True, target_branch="master")
     result = git_service.toggle_production_app("core", "api", 5, "user@example.com", config)
@@ -379,6 +380,7 @@ def test_bulk_toggle_production_apps_merge_request_mode(monkeypatch, tmp_path):
     monkeypatch.setattr(
         git_service, "_run", lambda args, cwd: rel_path if args[:2] == ["git", "status"] else ""
     )
+    monkeypatch.setattr(git_service, "_run_with_stderr", git_service._run)  # push MR doc ca stderr (link MR)
 
     config = _replicas_config(rel_path, use_merge_request=True, target_branch="master")
     result = git_service.bulk_toggle_production_apps(

@@ -24,10 +24,12 @@ def _push_config(db: Session) -> git_service.EnvReplicasPushConfig:
 
 
 def toggle_app(
-    db: Session, user: User, project: str, application: str, enabled: bool, replicas: int | None
+    db: Session, user: User, project: str, application: str, enabled: bool, replicas: int | None,
+    scheduled: bool = False,
 ) -> env_toggle_service.EnvActionResult:
     return env_toggle_service.toggle_app(
-        db, user, project, application, enabled, replicas, ENV_LABEL, git_service.toggle_staging_app, _push_config(db)
+        db, user, project, application, enabled, replicas, ENV_LABEL, git_service.toggle_staging_app, _push_config(db),
+        scheduled=scheduled,
     )
 
 
@@ -35,7 +37,8 @@ def bulk_toggle(
     db: Session, user: User, apps: list[tuple[str, str]], enabled: bool
 ) -> env_toggle_service.EnvActionResult:
     return env_toggle_service.bulk_toggle(
-        db, user, apps, enabled, ENV_LABEL, git_service.bulk_toggle_staging_apps, _push_config(db)
+        db, user, apps, enabled, ENV_LABEL, git_service.bulk_toggle_staging_apps, _push_config(db),
+        set_fn=git_service.set_staging_replicas,
     )
 
 
@@ -49,9 +52,10 @@ def turn_off_all(db: Session, user: User) -> env_toggle_service.EnvActionResult:
         result = git_service.ReplicasToggleResult(ok=False, message=str(exc))
 
     if result.ok and result.changed:
+        env_toggle_service.remember_replicas(db, ENV_LABEL, result.changed)
         env_toggle_service.write_through_cache(db, ENV_LABEL, result.changed, 0)
 
-    env_toggle_service.notify("Tắt tất cả staging", user.email, result, ENV_LABEL)
+    env_toggle_service.notify("Turn off all staging", user.email, result, ENV_LABEL)
     return env_toggle_service.EnvActionResult(ok=result.ok, message=result.message)
 
 

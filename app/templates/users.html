@@ -1,198 +1,357 @@
 {% extends "base.html" %}
 {% block title %}Quản lý User{% endblock %}
 {% block content %}
+{#
+  Cau hinh quyen DUY NHAT cua trang - bang tom tat (chip) va ma tran trong panel sua deu
+  sinh tu day ('chip' tuy chon: nhan rieng cho chip khi 'label' trung voi nhom khac). Them quyen moi: them 1 dong vao PERM_ROWS (flag = cot User, action = duong
+  dan route POST /users/{id}/<action> tra JSON {ok, message, <flag>}). Them moi truong moi:
+  them 1 phan tu vao PERM_ENVS + khai bao o tung dong.
+#}
+{% set PERM_ENVS = [
+  {'key': 'staging', 'label': 'Staging', 'short': 'Staging'},
+  {'key': 'production', 'label': 'Production', 'short': 'Prod'},
+] %}
+{% set PERM_ROWS = [
+  {'group': 'Staging / Production', 'label': 'View', 'hint': 'Chỉ xem',
+   'staging': {'flag': 'can_view_staging', 'action': 'staging-view-toggle'},
+   'production': {'flag': 'can_view_production', 'action': 'production-view-toggle'}},
+  {'group': 'Staging / Production', 'label': 'Replicas', 'hint': 'Bật/Tắt app, đổi số pod, Sync',
+   'staging': {'flag': 'can_toggle_staging', 'action': 'staging-toggle'},
+   'production': {'flag': 'can_toggle_production', 'action': 'production-toggle'}},
+  {'group': 'Staging / Production', 'label': 'Restart', 'hint': 'Nút Restart app',
+   'staging': {'flag': 'can_toggle_restart_staging', 'action': 'staging-restart-toggle'},
+   'production': {'flag': 'can_toggle_restart_production', 'action': 'production-restart-toggle'}},
+  {'group': 'Schedule', 'label': 'Restart view', 'hint': 'Chỉ xem lịch tự động restart',
+   'staging': {'flag': 'can_schedule_restart_view_staging', 'action': 'schedule-toggle/restart-view-staging'},
+   'production': {'flag': 'can_schedule_restart_view_production', 'action': 'schedule-toggle/restart-view-production'}},
+  {'group': 'Schedule', 'label': 'Restart edit', 'hint': 'Xem + tạo/sửa/xoá lịch tự động restart',
+   'staging': {'flag': 'can_schedule_restart_staging', 'action': 'schedule-toggle/restart-staging'},
+   'production': {'flag': 'can_schedule_restart_production', 'action': 'schedule-toggle/restart-production'}},
+  {'group': 'Schedule', 'label': 'Tắt/Bật view', 'hint': 'Chỉ xem lịch tự động tắt/bật app',
+   'staging': {'flag': 'can_schedule_toggle_view_staging', 'action': 'schedule-toggle/toggle-view-staging'},
+   'production': {'flag': 'can_schedule_toggle_view_production', 'action': 'schedule-toggle/toggle-view-production'}},
+  {'group': 'Schedule', 'label': 'Tắt/Bật edit', 'hint': 'Xem + tạo/sửa/xoá lịch tự động tắt/bật app',
+   'staging': {'flag': 'can_schedule_toggle_staging', 'action': 'schedule-toggle/toggle-staging'},
+   'production': {'flag': 'can_schedule_toggle_production', 'action': 'schedule-toggle/toggle-production'}},
+] %}
+{% set ns = namespace(flags=[]) %}
+{% for row in PERM_ROWS %}{% for env in PERM_ENVS %}{% set ns.flags = ns.flags + [row[env.key].flag] %}{% endfor %}{% endfor %}
+
+<style>
+  .users-toolbar { display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: center; margin-bottom: 1rem; }
+  .users-table td { vertical-align: middle; }
+  .role-badge { display: inline-block; padding: 0.2rem 0.6rem; border-radius: 999px; font-size: 0.78rem; font-weight: 600; background: #f1f5f9; color: #374151; }
+  .role-badge.super_admin { background: #fef3c7; color: #92400e; }
+  .role-badge.admin { background: #e0f2fe; color: #075985; }
+  .perm-summary { display: flex; flex-direction: column; gap: 0.3rem; }
+  .perm-line { display: flex; flex-wrap: wrap; align-items: center; gap: 0.3rem; font-size: 0.8rem; }
+  .perm-line .env { font-weight: 700; color: #374151; min-width: 3.6rem; }
+  .perm-chip { padding: 0.12rem 0.5rem; border-radius: 999px; background: #eff6ff; color: #1d4ed8; font-weight: 600; }
+  .perm-none { color: #9ca3af; font-size: 0.82rem; }
+  .pw-state { font-size: 0.82rem; color: #6b7280; }
+  .pw-state.set { color: #16a34a; }
+  .user-edit-btn { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; padding: 0; border-radius: 8px; }
+  .user-edit-btn svg { width: 15px; height: 15px; }
+
+  #user-modal .modal-box { max-width: 600px; max-height: calc(100vh - 2rem); overflow-y: auto; }
+  .um-head { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; margin-bottom: 1rem; }
+  .um-head h3 { margin: 0; font-size: 1.05rem; word-break: break-all; }
+  .um-section { margin-bottom: 1.25rem; }
+  .um-section > label, .um-section-title { display: block; font-size: 0.8rem; font-weight: 700; color: #6b7280; text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 0.4rem; }
+  .um-matrix { width: 100%; border-collapse: collapse; font-size: 0.9rem; }
+  .um-matrix th { font-size: 0.8rem; color: #6b7280; font-weight: 700; text-align: center; padding: 0.35rem; }
+  .um-matrix th:first-child { text-align: left; }
+  .um-matrix td { padding: 0.4rem 0.35rem; border-top: 1px solid #f1f5f9; text-align: center; }
+  .um-matrix td:first-child { text-align: left; }
+  .um-matrix .group-row td { border-top: none; padding-top: 0.75rem; font-size: 0.75rem; font-weight: 700; color: #3699FF; text-transform: uppercase; letter-spacing: 0.03em; }
+  .um-matrix .hint { display: block; font-size: 0.75rem; color: #9ca3af; }
+  .um-note { font-size: 0.82rem; color: #92400e; background: #fef3c7; border-radius: 8px; padding: 0.5rem 0.75rem; margin-bottom: 0.5rem; }
+  .um-pw { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+  .um-pw input { flex: 1 1 180px; }
+</style>
+
 <div class="card">
-  <h3>Quản lý role &amp; mật khẩu user</h3>
-  <table class="responsive-table">
-    <thead><tr><th>Email</th><th>Đổi role</th><th>Mật khẩu đăng nhập</th><th>Staging Replicas</th><th>Staging Restart</th><th>Staging Read</th><th>Production Replicas</th><th>Production Restart</th><th>Production Read</th></tr></thead>
+  <h3 style="margin-top:0;">Quản lý role, quyền &amp; mật khẩu user</h3>
+  <div class="users-toolbar">
+    <div style="position:relative; max-width:320px; flex:1 1 240px;">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+        style="position:absolute; left:0.6rem; top:50%; transform:translateY(-50%); width:15px; height:15px; stroke:#9ca3af; pointer-events:none;">
+        <circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <input type="text" id="users-filter" placeholder="Lọc theo email..."
+        style="width:100%; box-sizing:border-box; padding:0.45rem 0.6rem 0.45rem 2.1rem;">
+    </div>
+  </div>
+
+  <table class="responsive-table users-table">
+    <thead><tr><th>Email</th><th>Role</th><th>Quyền</th><th>Mật khẩu</th><th></th></tr></thead>
     <tbody>
       {% for u in users %}
-      <tr>
+      <tr data-user-id="{{ u.id }}" data-email="{{ u.email }}">
         <td data-label="Email">{{ u.email }}</td>
-        <td data-label="Đổi role">
-          <form class="inline role-form" method="post" action="/users/{{ u.id }}/role" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
-            <select name="role">
-              {% for r in roles %}
-              <option value="{{ r }}" {% if r == u.role.value %}selected{% endif %}>{{ r }}</option>
-              {% endfor %}
-            </select>
-            <button type="submit">Lưu</button>
-            <span class="inline-flash" style="font-size:0.8rem;"></span>
-          </form>
+        <td data-label="Role" class="u-role"><span class="role-badge {{ u.role.value }}">{{ u.role.value }}</span></td>
+        <td data-label="Quyền" class="u-perms"></td>
+        <td data-label="Mật khẩu" class="u-pw">
+          <span class="pw-state {{ 'set' if u.password_hash }}">{{ 'Đã đặt' if u.password_hash else 'Chưa đặt' }}</span>
         </td>
-        <td data-label="Mật khẩu đăng nhập">
-          <form class="inline ajax-form" method="post" action="/users/{{ u.id }}/password" style="display:flex; flex-wrap:wrap; gap:0.5rem; align-items:center;">
-            <input type="password" name="password" placeholder="Mật khẩu mới" minlength="6" required style="width:140px;">
-            <button type="submit">Đặt mật khẩu</button>
-            <span style="font-size:0.8rem; color:#888;">{{ 'đã đặt' if u.password_hash else 'chưa đặt' }}</span>
-            <span class="inline-flash" style="font-size:0.8rem;"></span>
-          </form>
-        </td>
-        <td data-label="Staging Replicas" data-user-id="{{ u.id }}" data-perm-cell="staging-replicas">
-          {% if u.role.value == 'super_admin' %}
-          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
-          {% else %}
-          <form class="inline perm-toggle-form" data-flag="can_toggle_staging" method="post" action="/users/{{ u.id }}/staging-toggle" style="display:flex; align-items:center; gap:0.5rem;">
-            <button type="submit" class="switch {{ 'on' if u.can_toggle_staging }}" title="Bật/Tắt quyền sửa replicas (Bật/Tắt, đổi số pod, Sync, Tắt tất cả) Staging"></button>
-            <span class="inline-flash" style="font-size:0.8rem;"></span>
-          </form>
-          {% endif %}
-        </td>
-        <td data-label="Staging Restart" data-user-id="{{ u.id }}" data-perm-cell="staging-restart">
-          {% if u.role.value == 'super_admin' %}
-          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
-          {% else %}
-          <form class="inline perm-toggle-form" data-flag="can_toggle_restart_staging" method="post" action="/users/{{ u.id }}/staging-restart-toggle" style="display:flex; align-items:center; gap:0.5rem;">
-            <button type="submit" class="switch {{ 'on' if u.can_toggle_restart_staging }}" title="Bật/Tắt quyền Restart Staging"></button>
-            <span class="inline-flash" style="font-size:0.8rem;"></span>
-          </form>
-          {% endif %}
-        </td>
-        <td data-label="Staging Read" data-user-id="{{ u.id }}" data-perm-cell="staging-read">
-          {% if u.role.value == 'super_admin' %}
-          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
-          {% else %}
-          <form class="inline perm-toggle-form" data-flag="can_view_staging" method="post" action="/users/{{ u.id }}/staging-view-toggle" style="display:flex; align-items:center; gap:0.5rem;">
-            <button type="submit" class="switch {{ 'on' if u.can_view_staging }}" title="Bật/Tắt quyền chỉ xem (read-only) Staging"></button>
-            <span class="inline-flash" style="font-size:0.8rem;"></span>
-          </form>
-          {% endif %}
-        </td>
-        <td data-label="Production Replicas" data-user-id="{{ u.id }}" data-perm-cell="production-replicas">
-          {% if u.role.value == 'super_admin' %}
-          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
-          {% else %}
-          <form class="inline perm-toggle-form" data-flag="can_toggle_production" method="post" action="/users/{{ u.id }}/production-toggle" style="display:flex; align-items:center; gap:0.5rem;">
-            <button type="submit" class="switch {{ 'on' if u.can_toggle_production }}" title="Bật/Tắt quyền sửa replicas (Bật/Tắt, đổi số pod, Sync) Production"></button>
-            <span class="inline-flash" style="font-size:0.8rem;"></span>
-          </form>
-          {% endif %}
-        </td>
-        <td data-label="Production Restart" data-user-id="{{ u.id }}" data-perm-cell="production-restart">
-          {% if u.role.value == 'super_admin' %}
-          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
-          {% else %}
-          <form class="inline perm-toggle-form" data-flag="can_toggle_restart_production" method="post" action="/users/{{ u.id }}/production-restart-toggle" style="display:flex; align-items:center; gap:0.5rem;">
-            <button type="submit" class="switch {{ 'on' if u.can_toggle_restart_production }}" title="Bật/Tắt quyền Restart Production"></button>
-            <span class="inline-flash" style="font-size:0.8rem;"></span>
-          </form>
-          {% endif %}
-        </td>
-        <td data-label="Production Read" data-user-id="{{ u.id }}" data-perm-cell="production-read">
-          {% if u.role.value == 'super_admin' %}
-          <button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>
-          {% else %}
-          <form class="inline perm-toggle-form" data-flag="can_view_production" method="post" action="/users/{{ u.id }}/production-view-toggle" style="display:flex; align-items:center; gap:0.5rem;">
-            <button type="submit" class="switch {{ 'on' if u.can_view_production }}" title="Bật/Tắt quyền chỉ xem (read-only) Production"></button>
-            <span class="inline-flash" style="font-size:0.8rem;"></span>
-          </form>
-          {% endif %}
+        <td>
+          <button type="button" class="user-edit-btn" data-user-id="{{ u.id }}" title="Sửa role, quyền, mật khẩu" aria-label="Sửa user">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 20h9"/><path d="M16.5 3.5a2.12 2.12 0 013 3L7 19l-4 1 1-4 12.5-12.5z"/>
+            </svg>
+          </button>
         </td>
       </tr>
       {% endfor %}
+      <tr id="users-filter-empty" style="display:none;"><td colspan="5">Không có user nào khớp bộ lọc</td></tr>
     </tbody>
   </table>
 </div>
 
+<div class="modal-overlay" id="user-modal" role="dialog" aria-modal="true" aria-labelledby="um-title">
+  <div class="modal-box">
+    <div class="um-head">
+      <h3 id="um-title"></h3>
+      <button type="button" id="um-close" aria-label="Đóng">✕</button>
+    </div>
+
+    <div class="um-section">
+      <label for="um-role">Role</label>
+      <select id="um-role">
+        {% for r in roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+      </select>
+    </div>
+
+    <div class="um-section">
+      <span class="um-section-title">Quyền</span>
+      <div class="um-note" id="um-super-note" hidden>Super Admin luôn có toàn quyền, không tắt được.</div>
+      <table class="um-matrix">
+        <thead>
+          <tr><th></th>{% for env in PERM_ENVS %}<th>{{ env.label }}</th>{% endfor %}</tr>
+        </thead>
+        <tbody>
+          {% for row in PERM_ROWS %}
+          {% if loop.first or row.group != PERM_ROWS[loop.index0 - 1].group %}
+          <tr class="group-row"><td colspan="{{ PERM_ENVS | length + 1 }}">{{ row.group }}</td></tr>
+          {% endif %}
+          <tr>
+            <td>{{ row.label }}<span class="hint">{{ row.hint }}</span></td>
+            {% for env in PERM_ENVS %}
+            <td><button type="button" class="switch um-perm" data-flag="{{ row[env.key].flag }}" data-action="{{ row[env.key].action }}"
+              title="{{ row.label }} {{ env.label }}" aria-label="{{ row.label }} {{ env.label }}"></button></td>
+            {% endfor %}
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div class="um-section" style="margin-bottom:0;">
+      <label for="um-password">Mật khẩu đăng nhập <span id="um-pw-state" class="pw-state" style="text-transform:none; font-weight:500;"></span></label>
+      <form class="um-pw" id="um-pw-form">
+        <input type="password" id="um-password" placeholder="Mật khẩu mới (ít nhất 6 ký tự)" minlength="6" required autocomplete="new-password">
+        <button type="submit">Đặt mật khẩu</button>
+      </form>
+    </div>
+  </div>
+</div>
+
 <script>
-  // .perm-toggle-form/.role-form KHONG dung class "ajax-form" - tu xu ly fetch rieng thay
-  // vi di qua doAjaxSubmit dung chung (base.html): doAjaxSubmit khi form co .inline-flash
-  // chi hien toast, KHONG reload trang, nen giao dien (nut switch, hay 6 cot Staging/
-  // Production Replicas/Restart/Read phu thuoc role) van giu nguyen trang thai CU cho toi
-  // khi nguoi dung tu F5. Dung event delegation (1 listener duy nhat tren document, khong
-  // phai forEach gan tung form luc trang vua load) vi doi role co the VE LAI HTML cua 6 o
-  // Staging/Production Replicas/Restart/Read trong CUNG hang (xem renderPermCell) - form
-  // .perm-toggle-form moi sinh ra sau do van phai hoat dong, khong the gan listener 1
-  // lan roi bo qua cac form them vao sau.
+  (function () {
+    // Du lieu user cho panel sua - chi cac co quyen trong PERM_ROWS (sinh tu cau hinh o
+    // dau file), KHONG lo truong nhay cam nao khac (password_hash chi co dang true/false).
+    const users = {
+      {% for u in users %}
+      {{ u.id }}: {
+        id: {{ u.id }},
+        email: {{ u.email | tojson }},
+        role: {{ u.role.value | tojson }},
+        passwordSet: {{ 'true' if u.password_hash else 'false' }},
+        flags: { {% for flag in ns.flags %}{{ flag | tojson }}: {{ 'true' if u[flag] else 'false' }}{{ ',' if not loop.last }}{% endfor %} },
+      },
+      {% endfor %}
+    };
+    const PERM_ENVS = {{ PERM_ENVS | tojson }};
+    const PERM_ROWS = {{ PERM_ROWS | tojson }};
 
-  const PERM_LABELS = {
-    'staging-replicas': { flag: 'can_toggle_staging', action: 'staging-toggle', title: 'Bật/Tắt quyền sửa replicas (Bật/Tắt, đổi số pod, Sync, Tắt tất cả) Staging' },
-    'staging-restart': { flag: 'can_toggle_restart_staging', action: 'staging-restart-toggle', title: 'Bật/Tắt quyền Restart Staging' },
-    'staging-read': { flag: 'can_view_staging', action: 'staging-view-toggle', title: 'Bật/Tắt quyền chỉ xem (read-only) Staging' },
-    'production-replicas': { flag: 'can_toggle_production', action: 'production-toggle', title: 'Bật/Tắt quyền sửa replicas (Bật/Tắt, đổi số pod, Sync) Production' },
-    'production-restart': { flag: 'can_toggle_restart_production', action: 'production-restart-toggle', title: 'Bật/Tắt quyền Restart Production' },
-    'production-read': { flag: 'can_view_production', action: 'production-view-toggle', title: 'Bật/Tắt quyền chỉ xem (read-only) Production' },
-  };
+    const modal = document.getElementById('user-modal');
+    const roleSelect = document.getElementById('um-role');
+    const superNote = document.getElementById('um-super-note');
+    const pwForm = document.getElementById('um-pw-form');
+    const pwInput = document.getElementById('um-password');
+    const pwState = document.getElementById('um-pw-state');
+    const permButtons = Array.from(document.querySelectorAll('.um-perm'));
+    let current = null;
 
-  function renderPermCellHtml(kind, userId, role, canToggle) {
-    if (role === 'super_admin') {
-      return '<button type="button" class="switch on" disabled title="Super Admin luôn full quyền, không tắt được"></button>';
+    async function postJson(url, body) {
+      const res = await fetch(url, { method: 'POST', headers: { Accept: 'application/json' }, body: body || new FormData() });
+      return res.json();
     }
-    const meta = PERM_LABELS[kind];
-    const onClass = canToggle ? ' on' : '';
-    return (
-      '<form class="inline perm-toggle-form" data-flag="' + meta.flag + '" method="post" ' +
-      'action="/users/' + userId + '/' + meta.action + '" style="display:flex; align-items:center; gap:0.5rem;">' +
-      '<button type="submit" class="switch' + onClass + '" title="' + meta.title + '"></button>' +
-      '<span class="inline-flash" style="font-size:0.8rem;"></span>' +
-      '</form>'
-    );
-  }
 
-  document.addEventListener('submit', async (e) => {
-    const form = e.target;
+    // Tom tat quyen 1 dong bang chip, nhom theo moi truong - CHI hien moi truong co it
+    // nhat 1 quyen. Super Admin: "Toan quyen".
+    function renderSummary(u) {
+      const row = document.querySelector('tr[data-user-id="' + u.id + '"]');
+      if (!row) return;
+      const roleCell = row.querySelector('.u-role');
+      const badge = document.createElement('span');
+      badge.className = 'role-badge ' + u.role;
+      badge.textContent = u.role;
+      roleCell.replaceChildren(badge);
 
-    if (form.classList.contains('perm-toggle-form')) {
-      e.preventDefault();
-      const button = form.querySelector('button[type="submit"]');
-      const flag = form.dataset.flag;
-      button.disabled = true;
+      const permCell = row.querySelector('.u-perms');
+      if (u.role === 'super_admin') {
+        const chip = document.createElement('span');
+        chip.className = 'perm-chip';
+        chip.textContent = 'Toàn quyền';
+        permCell.replaceChildren(chip);
+      } else {
+        const lines = PERM_ENVS.map((env) => {
+          const labels = PERM_ROWS.filter((r) => u.flags[r[env.key].flag]).map((r) => r.chip || r.label);
+          if (!labels.length) return null;
+          const line = document.createElement('div');
+          line.className = 'perm-line';
+          const envEl = document.createElement('span');
+          envEl.className = 'env';
+          envEl.textContent = env.short;
+          line.appendChild(envEl);
+          labels.forEach((label) => {
+            const chip = document.createElement('span');
+            chip.className = 'perm-chip';
+            chip.textContent = label;
+            line.appendChild(chip);
+          });
+          return line;
+        }).filter(Boolean);
+        if (lines.length) {
+          const wrap = document.createElement('div');
+          wrap.className = 'perm-summary';
+          wrap.append(...lines);
+          permCell.replaceChildren(wrap);
+        } else {
+          const none = document.createElement('span');
+          none.className = 'perm-none';
+          none.textContent = 'Chưa có quyền';
+          permCell.replaceChildren(none);
+        }
+      }
+
+      const pw = row.querySelector('.u-pw .pw-state');
+      pw.textContent = u.passwordSet ? 'Đã đặt' : 'Chưa đặt';
+      pw.classList.toggle('set', u.passwordSet);
+    }
+
+    function renderModal() {
+      const u = current;
+      document.getElementById('um-title').textContent = u.email;
+      roleSelect.value = u.role;
+      const isSuper = u.role === 'super_admin';
+      superNote.hidden = !isSuper;
+      permButtons.forEach((btn) => {
+        btn.classList.toggle('on', isSuper || !!u.flags[btn.dataset.flag]);
+        btn.disabled = isSuper;
+      });
+      pwState.textContent = u.passwordSet ? '(đã đặt)' : '(chưa đặt)';
+      pwState.classList.toggle('set', u.passwordSet);
+    }
+
+    function openModal(userId) {
+      current = users[userId];
+      if (!current) return;
+      pwInput.value = '';
+      renderModal();
+      modal.classList.add('open');
+    }
+    function closeModal() {
+      modal.classList.remove('open');
+      current = null;
+    }
+
+    document.querySelectorAll('.user-edit-btn').forEach((btn) => {
+      btn.addEventListener('click', () => openModal(btn.dataset.userId));
+    });
+    document.getElementById('um-close').addEventListener('click', closeModal);
+    modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+    document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && modal.classList.contains('open')) closeModal(); });
+
+    // Role: tu luu khi chon (khong can nut Luu). Route tra lai role + toan bo co quyen.
+    roleSelect.addEventListener('change', async () => {
+      const u = current;
+      const body = new FormData();
+      body.append('role', roleSelect.value);
+      roleSelect.disabled = true;
       try {
-        const res = await fetch(form.action, {
-          method: 'POST',
-          headers: { Accept: 'application/json' },
-          body: new FormData(form),
-        });
-        const data = await res.json();
+        const data = await postJson('/users/' + u.id + '/role', body);
         window.showToast(data.message, data.ok);
         if (data.ok) {
-          button.classList.toggle('on', !!data[flag]);
+          u.role = data.role;
+          Object.keys(u.flags).forEach((flag) => { if (flag in data) u.flags[flag] = !!data[flag]; });
         }
       } catch (err) {
-        form.submit();
-        return;
+        window.showToast('Lưu role thất bại, vui lòng thử lại', false);
       } finally {
-        button.disabled = false;
+        roleSelect.disabled = false;
+        if (current === u) renderModal();
+        renderSummary(u);
       }
-      return;
-    }
+    });
 
-    if (form.classList.contains('role-form')) {
+    // Moi switch goi DUNG route bat/tat san co cua quyen do (khong doi gi phia server).
+    permButtons.forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const u = current;
+        btn.disabled = true;
+        try {
+          const data = await postJson('/users/' + u.id + '/' + btn.dataset.action);
+          window.showToast(data.message, data.ok);
+          if (data.ok) u.flags[btn.dataset.flag] = !!data[btn.dataset.flag];
+        } catch (err) {
+          window.showToast('Lưu quyền thất bại, vui lòng thử lại', false);
+        } finally {
+          if (current === u) renderModal();
+          renderSummary(u);
+        }
+      });
+    });
+
+    pwForm.addEventListener('submit', async (e) => {
       e.preventDefault();
-      const button = form.querySelector('button[type="submit"]');
-      const row = form.closest('tr');
-      button.disabled = true;
+      const u = current;
+      const body = new FormData();
+      body.append('password', pwInput.value);
+      const submitBtn = pwForm.querySelector('button[type="submit"]');
+      submitBtn.disabled = true;
       try {
-        const res = await fetch(form.action, {
-          method: 'POST',
-          headers: { Accept: 'application/json' },
-          body: new FormData(form),
-        });
-        const data = await res.json();
+        const data = await postJson('/users/' + u.id + '/password', body);
         window.showToast(data.message, data.ok);
-        // Doi role anh huong TRUC TIEP giao dien 6 o Staging/Production Replicas/Restart/
-        // Read trong CUNG hang (Super Admin luon hien nut bat+khoa, khac han cac role con
-        // lai) - ve lai NGAY thay vi doi F5, dung dung role/co quyen vua tra ve tu server.
-        if (data.ok && row) {
-          const cells = {
-            'staging-replicas': [row.querySelector('[data-perm-cell="staging-replicas"]'), data.can_toggle_staging],
-            'staging-restart': [row.querySelector('[data-perm-cell="staging-restart"]'), data.can_toggle_restart_staging],
-            'staging-read': [row.querySelector('[data-perm-cell="staging-read"]'), data.can_view_staging],
-            'production-replicas': [row.querySelector('[data-perm-cell="production-replicas"]'), data.can_toggle_production],
-            'production-restart': [row.querySelector('[data-perm-cell="production-restart"]'), data.can_toggle_restart_production],
-            'production-read': [row.querySelector('[data-perm-cell="production-read"]'), data.can_view_production],
-          };
-          Object.entries(cells).forEach(([kind, [cell, canToggle]]) => {
-            if (cell) cell.innerHTML = renderPermCellHtml(kind, cell.dataset.userId, data.role, canToggle);
-          });
+        if (data.ok) {
+          u.passwordSet = true;
+          pwInput.value = '';
         }
       } catch (err) {
-        form.submit();
-        return;
+        window.showToast('Đặt mật khẩu thất bại, vui lòng thử lại', false);
       } finally {
-        button.disabled = false;
+        submitBtn.disabled = false;
+        if (current === u) renderModal();
+        renderSummary(u);
       }
-    }
-  });
+    });
+
+    // Loc theo email (client-side).
+    const filterInput = document.getElementById('users-filter');
+    const filterEmpty = document.getElementById('users-filter-empty');
+    filterInput.addEventListener('input', () => {
+      const q = filterInput.value.trim().toLowerCase();
+      let shown = 0;
+      document.querySelectorAll('tbody tr[data-user-id]').forEach((row) => {
+        const match = !q || row.dataset.email.toLowerCase().includes(q);
+        row.style.display = match ? '' : 'none';
+        if (match) shown += 1;
+      });
+      filterEmpty.style.display = shown === 0 ? '' : 'none';
+    });
+
+    Object.values(users).forEach(renderSummary);
+  })();
 </script>
 {% endblock %}
